@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Telegram - Cloud Server</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QRCode.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        /* Base Dark Glassmorphism */
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            background-image: radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
+                              radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.15), transparent 25%);
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        /* Make QR code white/light so it's scannable, we will just use a white background for the container */
+        #qr-container {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="glass-panel p-8 rounded-2xl w-full max-w-md shadow-2xl relative overflow-hidden">
+        <!-- Decoration -->
+        <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+        <div class="absolute -bottom-10 -left-10 w-40 h-40 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+
+        <div class="relative z-10 text-center mb-6">
+            <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">Connect Telegram</h1>
+            <p class="text-slate-400 mt-2 text-sm">Scan the QR code with your Telegram app to link your account securely.</p>
+        </div>
+
+        <div id="error-msg" class="hidden mb-4 p-3 bg-red-500/20 border border-red-500/50 text-red-200 text-sm rounded-lg text-center"></div>
+        <div id="success-msg" class="hidden mb-4 p-3 bg-green-500/20 border border-green-500/50 text-green-200 text-sm rounded-lg text-center"></div>
+        <div id="loading-msg" class="mb-4 p-3 text-slate-300 text-sm rounded-lg text-center animate-pulse">Generating QR Code...</div>
+
+        <!-- QR Code Display -->
+        <div id="qr-wrapper" class="hidden flex flex-col items-center justify-center mb-6">
+            <div id="qr-container"></div>
+            <p class="text-xs text-slate-400 mt-4 text-center">
+                Open Telegram on your phone <br>
+                Go to <b>Settings > Devices > Link Desktop Device</b>
+            </p>
+        </div>
+
+        <div class="mt-6 text-center">
+            <button id="btn-logout" class="text-sm text-slate-400 hover:text-white transition-colors">Sign Out</button>
+        </div>
+    </div>
+
+    <script>
+        // Check auth state
+        fetch('/api/me').then(async res => {
+            if (!res.ok) {
+                window.location.href = '/login.html';
+            } else {
+                const user = await res.json();
+                if (user.is_telegram_connected) {
+                    window.location.href = '/dashboard.html';
+                } else {
+                    startQRLogin();
+                }
+            }
+        });
+
+        const errorMsg = document.getElementById('error-msg');
+        const successMsg = document.getElementById('success-msg');
+        const loadingMsg = document.getElementById('loading-msg');
+        const qrWrapper = document.getElementById('qr-wrapper');
+        const qrContainer = document.getElementById('qr-container');
+        const btnLogout = document.getElementById('btn-logout');
+
+        let pollInterval = null;
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.classList.remove('hidden');
+            successMsg.classList.add('hidden');
+            loadingMsg.classList.add('hidden');
+            qrWrapper.classList.add('hidden');
+        }
+
+        function showSuccess(msg) {
+            successMsg.textContent = msg;
+            successMsg.classList.remove('hidden');
+            errorMsg.classList.add('hidden');
+            loadingMsg.classList.add('hidden');
+            qrWrapper.classList.add('hidden');
+        }
+
+        async function startQRLogin() {
+            try {
+                const res = await fetch('/api/telegram/qr-start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Failed to start QR login');
+                }
+
+                // Render QR code
+                loadingMsg.classList.add('hidden');
+                qrWrapper.classList.remove('hidden');
+                qrWrapper.classList.add('flex');
+                
+                qrContainer.innerHTML = "";
+                new QRCode(qrContainer, {
+                    text: data.url,
+                    width: 200,
+                    height: 200,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.L
+                });
+
+                // Start polling status
+                pollInterval = setInterval(() => checkStatus(data.token), 2000);
+                
+            } catch (err) {
+                showError(err.message);
+            }
+        }
+
+        async function checkStatus(token) {
+            try {
+                const res = await fetch(`/api/telegram/qr-status?token=${token}`);
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    clearInterval(pollInterval);
+                    showSuccess('Telegram connected! Redirecting to dashboard...');
+                    setTimeout(() => {
+                        window.location.href = '/dashboard.html';
+                    }, 1500);
+                } else if (data.status === 'failed' || data.status === 'not_found') {
+                    clearInterval(pollInterval);
+                    showError('QR Login failed or expired. Please refresh the page.');
+                }
+                // If pending, do nothing (keep polling)
+            } catch (err) {
+                console.error("Poll error:", err);
+            }
+        }
+
+        btnLogout.addEventListener('click', async () => {
+            if (pollInterval) clearInterval(pollInterval);
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login.html';
+        });
+    </script>
+</body>
+</html>

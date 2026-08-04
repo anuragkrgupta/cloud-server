@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Telegram Cloud Storage</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            background-image: radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
+                              radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.15), transparent 25%);
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 flex justify-center items-center">
+
+    <div class="glass-panel p-8 rounded-2xl w-full max-w-2xl shadow-2xl relative overflow-hidden">
+        <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+
+        <div class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
+            <div>
+                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">Dashboard</h1>
+                <p class="text-slate-400 mt-1 text-sm">Welcome back, <span id="welcome-name">...</span>!</p>
+            </div>
+            <button id="logout-btn" class="bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                Sign Out
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Account Details -->
+            <div class="bg-slate-900/50 p-5 rounded-xl border border-slate-700/50">
+                <h3 class="text-lg font-semibold text-slate-200 mb-4">Account Details</h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400">Name</span>
+                        <span class="text-slate-100 font-medium" id="display-name">...</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-slate-400">Email</span>
+                        <span class="text-slate-100 font-medium" id="display-email">...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Telegram Connection -->
+            <div class="bg-slate-900/50 p-5 rounded-xl border border-slate-700/50">
+                <h3 class="text-lg font-semibold text-slate-200 mb-4">Telegram Status</h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between text-sm items-center">
+                        <span class="text-slate-400">Status</span>
+                        <span id="tg-status" class="px-2 py-1 rounded text-xs font-medium">Checking...</span>
+                    </div>
+                    <div id="tg-channel-row" class="flex justify-between text-sm mt-3 hidden">
+                        <span class="text-slate-400">Storage Channel</span>
+                        <span class="text-slate-100 font-medium font-mono text-xs" id="tg-channel-id"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="mt-8 bg-slate-900/50 p-5 rounded-xl border border-slate-700/50">
+            <h3 class="text-lg font-semibold text-slate-200 mb-4">Upload a File</h3>
+            <form id="upload-form" class="space-y-4">
+                <div id="upload-msg" class="hidden p-3 text-sm rounded-lg"></div>
+                
+                <div class="flex items-center justify-center w-full">
+                    <label for="file-upload" class="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-600 border-dashed rounded-lg cursor-pointer hover:bg-slate-800 hover:border-indigo-500 transition-all">
+                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                            <svg class="w-8 h-8 mb-3 text-slate-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                            </svg>
+                            <p class="mb-2 text-sm text-slate-400"><span class="font-semibold text-indigo-400">Click to upload</span> or drag and drop</p>
+                            <p class="text-xs text-slate-500" id="file-name-display">No file selected</p>
+                        </div>
+                        <input id="file-upload" type="file" class="hidden" required />
+                    </label>
+                </div>
+                
+                <button type="submit" id="btn-upload" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2 rounded-lg transition-all shadow-lg hover:shadow-indigo-500/25">
+                    Upload to Telegram
+                </button>
+            </form>
+        </div>
+
+        <!-- Uploaded Files Placeholder -->
+        <div class="mt-8 bg-slate-900/50 p-5 rounded-xl border border-slate-700/50">
+            <h3 class="text-lg font-semibold text-slate-200 mb-4">My Files</h3>
+            <ul id="files-list" class="space-y-3 text-sm text-slate-300">
+                <li class="text-slate-500 italic">Loading files...</li>
+            </ul>
+        </div>
+
+    </div>
+
+    <script>
+        // Check Auth State on load
+        fetch('/api/me').then(async res => {
+            if (!res.ok) {
+                window.location.href = '/login.html';
+                return;
+            }
+            const user = await res.json();
+            
+            if (!user.is_telegram_connected) {
+                window.location.href = '/setup_telegram.html';
+                return;
+            }
+
+            document.getElementById('welcome-name').textContent = user.name;
+            document.getElementById('display-name').textContent = user.name;
+            document.getElementById('display-email').textContent = user.email;
+            
+            const tgStatus = document.getElementById('tg-status');
+            tgStatus.textContent = 'Connected';
+            tgStatus.className = 'px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs font-medium border border-green-500/30';
+            
+            if (user.channel_id) {
+                document.getElementById('tg-channel-row').classList.remove('hidden');
+                document.getElementById('tg-channel-id').textContent = user.channel_id;
+            }
+
+            loadFiles();
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login.html';
+        });
+
+        const fileInput = document.getElementById('file-upload');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const uploadForm = document.getElementById('upload-form');
+        const btnUpload = document.getElementById('btn-upload');
+        const uploadMsg = document.getElementById('upload-msg');
+        const filesList = document.getElementById('files-list');
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileNameDisplay.textContent = e.target.files[0].name;
+                fileNameDisplay.classList.add('text-indigo-300');
+            } else {
+                fileNameDisplay.textContent = "No file selected";
+                fileNameDisplay.classList.remove('text-indigo-300');
+            }
+        });
+
+        function showMsg(msg, isError=false) {
+            uploadMsg.textContent = msg;
+            uploadMsg.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/50', 'text-red-200', 'bg-green-500/20', 'border-green-500/50', 'text-green-200');
+            
+            if (isError) {
+                uploadMsg.classList.add('bg-red-500/20', 'border', 'border-red-500/50', 'text-red-200');
+            } else {
+                uploadMsg.classList.add('bg-green-500/20', 'border', 'border-green-500/50', 'text-green-200');
+            }
+        }
+
+        // Fetch and display files
+        async function loadFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const files = await res.json();
+                
+                if (files.length === 0) {
+                    filesList.innerHTML = '<li class="text-slate-500 italic">No files uploaded yet. Upload a file above!</li>';
+                    return;
+                }
+                
+                filesList.innerHTML = '';
+                files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.className = 'flex justify-between items-center bg-slate-800/50 p-3 rounded-lg border border-slate-700 transition-all hover:border-slate-500';
+                    li.id = `file-${file.id}`;
+                    
+                    const sizeStr = (file.file_size / 1024).toFixed(2) + ' KB';
+                    
+                    li.innerHTML = `
+                        <div class="flex-1 overflow-hidden pr-4">
+                            <div class="font-medium text-slate-200 truncate">${file.original_name}</div>
+                            <div class="text-xs text-slate-500">Size: ${sizeStr}</div>
+                        </div>
+                        <div class="flex space-x-2 shrink-0">
+                            <button onclick="downloadFile(${file.id})" class="p-2 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded-lg transition-colors border border-indigo-500/30" title="Download">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            </button>
+                            <button onclick="deleteFile(${file.id})" class="p-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg transition-colors border border-red-500/30" title="Delete">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    `;
+                    filesList.appendChild(li);
+                });
+            } catch (err) {
+                console.error("Failed to load files:", err);
+            }
+        }
+
+        window.downloadFile = (id) => {
+            window.location.href = \`/api/download/\${id}\`;
+        };
+
+        window.deleteFile = async (id) => {
+            if(!confirm("Are you sure you want to permanently delete this file from Telegram?")) return;
+            
+            try {
+                const res = await fetch(\`/api/files/\${id}\`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Failed to delete file');
+                
+                const item = document.getElementById(\`file-\${id}\`);
+                if (item) item.remove();
+                
+                if (filesList.children.length === 0) {
+                    filesList.innerHTML = '<li class="text-slate-500 italic">No files uploaded yet. Upload a file above!</li>';
+                }
+            } catch (err) {
+                alert(err.message);
+            }
+        };
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (fileInput.files.length === 0) return;
+            
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            btnUpload.disabled = true;
+            btnUpload.textContent = "Uploading to Telegram...";
+            uploadMsg.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData 
+                });
+                
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Upload failed');
+                }
+                
+                showMsg('File successfully uploaded to Telegram!');
+                fileInput.value = "";
+                fileNameDisplay.textContent = "No file selected";
+                fileNameDisplay.classList.remove('text-indigo-300');
+                
+                // Refresh list
+                loadFiles();
+                
+            } catch (err) {
+                showMsg(err.message, true);
+            } finally {
+                btnUpload.disabled = false;
+                btnUpload.textContent = "Upload to Telegram";
+            }
+        });
+    </script>
+</body>
+</html>
