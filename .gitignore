@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# SQLite
+*.db
+*.sqlite3
+
+# Project Specific
+backend/sessions/
+backend/downloads/
+*.session
+
+# Frontend / JS
+node_modules/
+dist/
+build/
+.npm
+.yarn
+
+# OS generated files
+.DS_Store
+Thumbs.db
