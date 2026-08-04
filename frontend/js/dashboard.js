@@ -53,12 +53,16 @@ fileInput.addEventListener('change', (e) => {
 
 function showMsg(msg, isError=false) {
     uploadMsg.textContent = msg;
-    uploadMsg.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/50', 'text-red-200', 'bg-green-500/20', 'border-green-500/50', 'text-green-200');
+    uploadMsg.classList.remove('hidden', 'bg-red-500/20', 'border-red-500/50', 'text-red-200', 'bg-green-500/20', 'border-green-500/50', 'text-green-200', 'bg-blue-500/20', 'border-blue-500/50', 'text-blue-200');
     
     if (isError) {
         uploadMsg.classList.add('bg-red-500/20', 'border', 'border-red-500/50', 'text-red-200');
     } else {
-        uploadMsg.classList.add('bg-green-500/20', 'border', 'border-green-500/50', 'text-green-200');
+        if(msg.includes('Uploading') || msg.includes('Resuming')) {
+             uploadMsg.classList.add('bg-blue-500/20', 'border', 'border-blue-500/50', 'text-blue-200');
+        } else {
+             uploadMsg.classList.add('bg-green-500/20', 'border', 'border-green-500/50', 'text-green-200');
+        }
     }
 }
 
@@ -136,22 +140,84 @@ uploadForm.addEventListener('submit', async (e) => {
         return;
     }
     
-    const formData = new FormData();
-    formData.append('file', file);
     btnUpload.disabled = true;
     btnUpload.textContent = "Uploading to Cloud...";
     uploadMsg.classList.add('hidden');
 
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks to FastAPI
+    const TELEGRAM_PART_SIZE = 512 * 1024; // 512KB strict parts
+    // Calculate total 512KB parts for the ENTIRE file
+    const totalParts = Math.ceil(file.size / TELEGRAM_PART_SIZE);
+    
+    // Generate a pseudo-random 64-bit ID for Telegram
+    // Since JS numbers are double precision, we generate a large random integer
+    const fileId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+    
+    // Check if it's considered "Big" by Telegram (>10MB)
+    const isBig = file.size > 10 * 1024 * 1024;
+
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    
     try {
-        const res = await fetch('/api/upload', {
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            const start = chunkIndex * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            // Calculate which 512KB part index this chunk starts at
+            const startPartIndex = Math.floor(start / TELEGRAM_PART_SIZE);
+            
+            let chunkUploaded = false;
+            let retryCount = 0;
+            
+            while (!chunkUploaded) {
+                try {
+                    const chunkData = new FormData();
+                    chunkData.append('file_id', fileId);
+                    chunkData.append('start_part_index', startPartIndex);
+                    chunkData.append('total_parts', totalParts);
+                    chunkData.append('is_big', isBig);
+                    chunkData.append('file', chunk);
+                    
+                    showMsg(`Uploading... ${Math.round((chunkIndex / totalChunks) * 100)}% (Chunk ${chunkIndex+1}/${totalChunks})`);
+                    
+                    const res = await fetch('/api/upload/chunk', {
+                        method: 'POST',
+                        body: chunkData
+                    });
+                    
+                    if (!res.ok) {
+                        const errorData = await res.json();
+                        throw new Error(errorData.detail || 'Chunk upload failed');
+                    }
+                    chunkUploaded = true;
+                } catch (err) {
+                    retryCount++;
+                    console.error(`Chunk upload failed, retrying (${retryCount})...`, err);
+                    showMsg(`Network issue. Resuming... (Retry ${retryCount})`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * Math.min(retryCount, 5))); // Exponential backoff
+                }
+            }
+        }
+        
+        // Finalize
+        showMsg('Finalizing upload in Telegram...');
+        const finalizeRes = await fetch('/api/upload/finalize', {
             method: 'POST',
-            body: formData 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_id: fileId,
+                total_parts: totalParts,
+                filename: file.name,
+                is_big: isBig,
+                file_size: file.size,
+                mime_type: file.type || "application/octet-stream"
+            })
         });
         
-        const data = await res.json();
-        
-        if (!res.ok) {
-            throw new Error(data.detail || 'Upload failed');
+        if (!finalizeRes.ok) {
+            const errorData = await finalizeRes.json();
+            throw new Error(errorData.detail || 'Finalization failed');
         }
         
         showMsg('File successfully uploaded in Cloud!');
