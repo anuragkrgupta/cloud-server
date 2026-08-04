@@ -107,7 +107,7 @@ window.downloadFile = (id) => {
 };
 
 window.deleteFile = async (id) => {
-    if(!confirm("Are you sure you want to permanently delete this file from Telegram?")) return;
+    if(!confirm("Are you sure you want to permanently delete this file from Cloud?")) return;
     
     try {
         const res = await fetch(`/api/files/${id}`, { method: 'DELETE' });
@@ -134,7 +134,7 @@ uploadForm.addEventListener('submit', async (e) => {
     formData.append('file', file);
     
     btnUpload.disabled = true;
-    btnUpload.textContent = "Uploading to Telegram...";
+    btnUpload.textContent = "Uploading to Cloud...";
     uploadMsg.classList.add('hidden');
 
     try {
@@ -149,7 +149,7 @@ uploadForm.addEventListener('submit', async (e) => {
             throw new Error(data.detail || 'Upload failed');
         }
         
-        showMsg('File successfully uploaded to Telegram!');
+        showMsg('File successfully uploaded in Cloud!');
         fileInput.value = "";
         fileNameDisplay.textContent = "No file selected";
         fileNameDisplay.classList.remove('text-indigo-300');
@@ -161,6 +161,6 @@ uploadForm.addEventListener('submit', async (e) => {
         showMsg(err.message, true);
     } finally {
         btnUpload.disabled = false;
-        btnUpload.textContent = "Upload to Telegram";
+        btnUpload.textContent = "Upload to Cloud";
     }
 });

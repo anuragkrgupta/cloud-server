@@ -33,7 +33,7 @@ form.addEventListener('submit', async (e) => {
   submitBtn.textContent = 'Logging in…';
 
   const payload = {
-    name: document.getElementById('name').value.trim(),
+    email: document.getElementById('email').value.trim(),
     password: document.getElementById('password').value,
   };
 
