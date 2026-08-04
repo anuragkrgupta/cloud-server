@@ -138,7 +138,6 @@ uploadForm.addEventListener('submit', async (e) => {
     
     const formData = new FormData();
     formData.append('file', file);
-    
     btnUpload.disabled = true;
     btnUpload.textContent = "Uploading to Cloud...";
     uploadMsg.classList.add('hidden');
