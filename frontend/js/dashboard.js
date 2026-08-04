@@ -130,6 +130,12 @@ uploadForm.addEventListener('submit', async (e) => {
     if (fileInput.files.length === 0) return;
     
     const file = fileInput.files[0];
+    const MAX_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+    if (file.size > MAX_SIZE) {
+        showMsg('File size exceeds the 2GB limit.', true);
+        return;
+    }
+    
     const formData = new FormData();
     formData.append('file', file);
     

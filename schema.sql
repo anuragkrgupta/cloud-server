@@ -10,15 +10,16 @@ CREATE DATABASE IF NOT EXISTS auth_app
 USE auth_app;
 
 CREATE TABLE IF NOT EXISTS users (
-    id              INT AUTO_INCREMENT PRIMARY KEY,
-    username        VARCHAR(50)  NOT NULL UNIQUE,
-    email           VARCHAR(255) NOT NULL UNIQUE,
-    hashed_password VARCHAR(255) NOT NULL,
-    is_active       BOOLEAN      NOT NULL DEFAULT TRUE,
-    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                 ON UPDATE CURRENT_TIMESTAMP,
+    id               INT AUTO_INCREMENT PRIMARY KEY,
+    name             VARCHAR(50)  NOT NULL,
+    email            VARCHAR(255) NOT NULL UNIQUE,
+    password         VARCHAR(255) NOT NULL,
+    telegram_phone   VARCHAR(50),
+    telegram_user_id VARCHAR(50),
+    telegram_session VARCHAR(1000),
+    channel_id       VARCHAR(50),
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX idx_username (username),
+    INDEX idx_name (name),
     INDEX idx_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
