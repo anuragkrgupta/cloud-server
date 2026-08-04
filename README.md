@@ -12,9 +12,9 @@ A modern, fast, and scalable cloud storage web application that uses **Telegram*
 
 ### Phase 2: Telegram Account Integration (Completed)
 - Integrated `Telethon` for asynchronous Telegram communication.
-- Built a streamlined UI for users to connect their Telegram account securely via OTP.
+- Built a streamlined UI for users to connect their Telegram account securely via **QR Code scanning** (replacing legacy OTP).
 - Automatically provisions a private "Personal Cloud Storage" Telegram channel upon linking.
-- Securely stores the Telegram Session String, User ID, and Channel ID in the database.
+- Securely stores the Telegram Session String, User ID, and Channel ID strictly on the backend database (no session keys exposed to frontend).
 
 ### Phase 3: File Upload (Completed)
 - Built a dedicated file upload API (`/api/upload`) that receives multipart form data.
@@ -25,14 +25,16 @@ A modern, fast, and scalable cloud storage web application that uses **Telegram*
 ### Phase 4: File Management (Completed)
 - Users can view a list of all files uploaded during their session via the `/api/files` endpoint.
 - Implemented file downloading via FastAPI `StreamingResponse` which leverages Telethon's `iter_download()` to stream the file directly from Telegram to the user, completely bypassing local disk storage.
-- Added file deletion support: instantly deletes the Telegram message and cleans up the local MySQL `FileRecord`.
+- Added file deletion support: instantly deletes the Telegram message and cleans up the local MySQL/SQLite `FileRecord`.
 
 ### Phase 5: Testing & Finalization (Completed)
 - Re-architected project into a clear `frontend/` (Static HTML/JS/CSS) and `backend/` (FastAPI JSON APIs) separation.
 - Completely migrated from Jinja2 templates to pure REST API architecture.
-- Improved Error handling, JWT token management, and automatic Telegram session validation.
+- Replaced OTP flow with a secure QR Code polling mechanism (`qrcode.js`).
+- Improved Error handling, JWT token management, and automatic Telegram session validation (`is_telegram_connected` boolean flag).
 - Standardized database column naming to `users` and `files` according to the core requirements.
-- Polished the modern web UI for seamless AJAX workflow (Login -> OTP -> Upload -> Download -> Delete).
+- Polished the modern web UI for seamless AJAX workflow (Login -> QR Scan -> Upload -> Download -> Delete).
+- Pinned `bcrypt==3.2.2` to resolve `passlib` compatibility issues with modern bcrypt versions.
 
 ## Prerequisites
 - Python 3.10+
@@ -43,16 +45,19 @@ A modern, fast, and scalable cloud storage web application that uses **Telegram*
 
 1. **Clone the repository and prepare the virtual environment.**
    ```bash
+   cd backend
    python -m venv venv
+   
    # On Windows:
-   .\venv\Scripts\Activate.ps1
+   .\venv\Scripts\activate
+   
    # On Mac/Linux:
    source venv/bin/activate
    ```
 
 2. **Install dependencies:**
    ```bash
-   pip install -r backend/requirements.txt
+   pip install -r requirements.txt
    ```
 
 3. **Configure Environment Variables:**
@@ -61,6 +66,7 @@ A modern, fast, and scalable cloud storage web application that uses **Telegram*
      ```env
      TG_API_ID=your_api_id
      TG_API_HASH=your_api_hash
+     JWT_SECRET=your_jwt_secret_key
      ```
 
 4. **Initialize Database:**
@@ -68,6 +74,6 @@ A modern, fast, and scalable cloud storage web application that uses **Telegram*
 
 5. **Run the Server:**
    ```bash
-   cd backend
-   uvicorn app.main:app --reload --port 8000
+   python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
    ```
+   *Note: The frontend is served as static files from the FastAPI app directly (no Node.js required).*
