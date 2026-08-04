@@ -1,7 +1,7 @@
 import os
 import shutil
 import tempfile
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List
 from fastapi.responses import StreamingResponse
@@ -11,12 +11,37 @@ from app.database import get_db
 from app.models import User, FileRecord
 from app.auth import get_current_user
 from app.schemas import FileOut, Message
-from app.services.telegram_service import upload_file_to_telegram, download_file_stream, delete_file_from_telegram
+from app.services.telegram_service import (
+    upload_file_to_telegram, 
+    download_file_stream, 
+    delete_file_from_telegram,
+    upload_chunk_to_telegram,
+    finalize_telegram_upload
+)
+from pydantic import BaseModel
+
+class ChunkUploadParams(BaseModel):
+    file_id: int
+    start_part_index: int
+    total_parts: int
+    is_big: bool
+
+class FinalizeUploadParams(BaseModel):
+    file_id: int
+    total_parts: int
+    filename: str
+    is_big: bool
+    file_size: int
+    mime_type: str
 
 router = APIRouter()
 
-@router.post("/api/upload", response_model=FileOut)
-async def upload_file(
+@router.post("/api/upload/chunk")
+async def upload_chunk(
+    file_id: int = Form(...),
+    start_part_index: int = Form(...),
+    total_parts: int = Form(...),
+    is_big: bool = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -24,38 +49,44 @@ async def upload_file(
     if not current_user.telegram_session or not current_user.channel_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
 
-    temp_dir = tempfile.gettempdir()
-    temp_file_path = os.path.join(temp_dir, file.filename)
-    
     try:
-        MAX_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
-        
-        # FastAPI's UploadFile may populate the size attribute
-        if file.size and file.size > MAX_SIZE:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File size exceeds the 2GB limit.")
+        chunk_data = await file.read()
+        await upload_chunk_to_telegram(
+            session_string=current_user.telegram_session,
+            file_id=file_id,
+            start_part_index=start_part_index,
+            total_parts=total_parts,
+            chunk_data=chunk_data,
+            is_big=is_big
+        )
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to upload chunk: {str(e)}")
 
-        file_size = 0
-        with open(temp_file_path, "wb") as buffer:
-            while chunk := file.file.read(8192 * 4):  # 32KB chunks
-                file_size += len(chunk)
-                if file_size > MAX_SIZE:
-                    buffer.close()
-                    os.remove(temp_file_path)
-                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File size exceeds the 2GB limit.")
-                buffer.write(chunk)
-        
-        msg_id = await upload_file_to_telegram(
+@router.post("/api/upload/finalize", response_model=FileOut)
+async def finalize_upload(
+    params: FinalizeUploadParams,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not current_user.telegram_session or not current_user.channel_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
+
+    try:
+        msg_id = await finalize_telegram_upload(
             session_string=current_user.telegram_session,
             channel_id=current_user.channel_id,
-            file_path=temp_file_path,
-            filename=file.filename
+            file_id=params.file_id,
+            total_parts=params.total_parts,
+            filename=params.filename,
+            is_big=params.is_big
         )
         
         file_record = FileRecord(
             user_id=current_user.id,
-            original_name=file.filename,
-            file_size=file_size,
-            mime_type=file.content_type or "application/octet-stream",
+            original_name=params.filename,
+            file_size=params.file_size,
+            mime_type=params.mime_type or "application/octet-stream",
             telegram_message_id=msg_id
         )
         
@@ -64,12 +95,8 @@ async def upload_file(
         db.refresh(file_record)
         
         return file_record
-        
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to upload file: {str(e)}")
-    finally:
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to finalize upload: {str(e)}")
 
 @router.get("/api/files", response_model=List[FileOut])
 def get_files(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
