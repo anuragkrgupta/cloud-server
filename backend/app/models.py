@@ -2,7 +2,8 @@
 Database schema (SQLAlchemy ORM models).
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, BigInteger
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -33,10 +34,24 @@ class FileRecord(Base):
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     original_name = Column(String(255), nullable=False)
     telegram_file_id = Column(String(255), nullable=True)
-    telegram_message_id = Column(Integer, nullable=False)
-    file_size = Column(Integer, nullable=False)
+    file_size = Column(BigInteger, nullable=False)  # BigInteger to support sizes > 2GB
     uploaded_at = Column(DateTime, server_default=func.now(), nullable=False)
     mime_type = Column(String(100), nullable=True) # Kept for internal logic
+    
+    parts = relationship("FilePartRecord", back_populates="file", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<FileRecord id={self.id} original_name={self.original_name!r}>"
+
+class FilePartRecord(Base):
+    __tablename__ = "file_parts"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id"), index=True, nullable=False)
+    part_index = Column(Integer, nullable=False)
+    telegram_message_id = Column(Integer, nullable=False)
+    
+    file = relationship("FileRecord", back_populates="parts")
+
+    def __repr__(self) -> str:
+        return f"<FilePartRecord id={self.id} file_id={self.file_id} part={self.part_index}>"
