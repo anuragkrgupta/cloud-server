@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 import urllib.parse
 
 from app.database import get_db
-from app.models import User, FileRecord
+from app.models import User, FileRecord, FilePartRecord
 from app.auth import get_current_user
 from app.schemas import FileOut, Message
 from app.services.telegram_service import (
@@ -26,13 +26,17 @@ class ChunkUploadParams(BaseModel):
     total_parts: int
     is_big: bool
 
-class FinalizeUploadParams(BaseModel):
+class FinalizeVolumeParams(BaseModel):
     file_id: int
     total_parts: int
     filename: str
     is_big: bool
+
+class CompleteUploadParams(BaseModel):
+    filename: str
     file_size: int
     mime_type: str
+    message_ids: List[int]
 
 router = APIRouter()
 
@@ -63,9 +67,9 @@ async def upload_chunk(
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to upload chunk: {str(e)}")
 
-@router.post("/api/upload/finalize", response_model=FileOut)
-async def finalize_upload(
-    params: FinalizeUploadParams,
+@router.post("/api/upload/finalize_volume")
+async def finalize_volume(
+    params: FinalizeVolumeParams,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -81,22 +85,41 @@ async def finalize_upload(
             filename=params.filename,
             is_big=params.is_big
         )
-        
+        return {"message_id": msg_id}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to finalize volume: {str(e)}")
+
+@router.post("/api/upload/complete", response_model=FileOut)
+def complete_upload(
+    params: CompleteUploadParams,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
         file_record = FileRecord(
             user_id=current_user.id,
             original_name=params.filename,
             file_size=params.file_size,
-            mime_type=params.mime_type or "application/octet-stream",
-            telegram_message_id=msg_id
+            mime_type=params.mime_type or "application/octet-stream"
         )
-        
         db.add(file_record)
         db.commit()
         db.refresh(file_record)
         
+        for idx, msg_id in enumerate(params.message_ids):
+            part_record = FilePartRecord(
+                file_id=file_record.id,
+                part_index=idx,
+                telegram_message_id=msg_id
+            )
+            db.add(part_record)
+            
+        db.commit()
+        db.refresh(file_record)
         return file_record
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to finalize upload: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to complete upload: {str(e)}")
 
 @router.get("/api/files", response_model=List[FileOut])
 def get_files(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -107,6 +130,7 @@ def get_files(db: Session = Depends(get_db), current_user: User = Depends(get_cu
 @router.get("/api/download/{file_id}")
 async def download_file(
     file_id: int, 
+    inline: bool = False,
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
@@ -119,18 +143,28 @@ async def download_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         
     try:
-        stream = download_file_stream(
-            session_string=current_user.telegram_session,
-            channel_id=current_user.channel_id,
-            message_id=file_record.telegram_message_id
-        )
-        
+        # Eagerly extract needed fields while DB session is open
+        telegram_session = current_user.telegram_session
+        channel_id = current_user.channel_id
+        part_message_ids = [p.telegram_message_id for p in sorted(file_record.parts, key=lambda p: p.part_index)]
+
+        async def combined_stream():
+            for message_id in part_message_ids:
+                stream = download_file_stream(
+                    session_string=telegram_session,
+                    channel_id=channel_id,
+                    message_id=message_id
+                )
+                async for chunk in stream:
+                    yield chunk
+
         safe_filename = urllib.parse.quote(file_record.original_name)
+        disposition = "inline" if inline else "attachment"
         headers = {
-            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_filename}"
         }
         
-        return StreamingResponse(stream, media_type=file_record.mime_type, headers=headers)
+        return StreamingResponse(combined_stream(), media_type=file_record.mime_type, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stream file: {str(e)}")
 
@@ -149,11 +183,12 @@ async def delete_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         
     try:
-        await delete_file_from_telegram(
-            session_string=current_user.telegram_session,
-            channel_id=current_user.channel_id,
-            message_id=file_record.telegram_message_id
-        )
+        for part in file_record.parts:
+            await delete_file_from_telegram(
+                session_string=current_user.telegram_session,
+                channel_id=current_user.channel_id,
+                message_id=part.telegram_message_id
+            )
         
         db.delete(file_record)
         db.commit()
