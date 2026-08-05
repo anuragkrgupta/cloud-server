@@ -38,8 +38,17 @@ const fileInput = document.getElementById('file-upload');
 const fileNameDisplay = document.getElementById('file-name-display');
 const uploadForm = document.getElementById('upload-form');
 const btnUpload = document.getElementById('btn-upload');
+const btnCancel = document.getElementById('btn-cancel');
 const uploadMsg = document.getElementById('upload-msg');
 const filesList = document.getElementById('files-list');
+
+let currentAbortController = null;
+
+btnCancel.addEventListener('click', () => {
+    if (currentAbortController) {
+        currentAbortController.abort();
+    }
+});
 
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
@@ -85,12 +94,32 @@ async function loadFiles() {
             
             const sizeStr = (file.file_size / 1024).toFixed(2) + ' KB';
             
+            // Check if file is previewable
+            const isPreviewable = file.mime_type && (
+                file.mime_type.startsWith('image/') || 
+                file.mime_type.startsWith('video/') || 
+                file.mime_type.startsWith('audio/') || 
+                file.mime_type.startsWith('text/')
+            );
+
+            let previewBtn = '';
+            if (isPreviewable) {
+                // Escape quotes in filename for the onclick handler
+                const safeName = file.original_name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                previewBtn = `
+                    <button onclick="previewFile(${file.id}, '${safeName}')" class="p-2 bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded-lg transition-colors border border-green-500/30" title="Preview">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    </button>
+                `;
+            }
+            
             li.innerHTML = `
                 <div class="flex-1 overflow-hidden pr-4">
                     <div class="font-medium text-slate-200 truncate">${file.original_name}</div>
                     <div class="text-xs text-slate-500">Size: ${sizeStr}</div>
                 </div>
                 <div class="flex space-x-2 shrink-0">
+                    ${previewBtn}
                     <button onclick="downloadFile(${file.id})" class="p-2 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded-lg transition-colors border border-indigo-500/30" title="Download">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     </button>
@@ -109,6 +138,22 @@ async function loadFiles() {
 window.downloadFile = (id) => {
     window.location.href = `/api/download/${id}`;
 };
+
+const previewModal = document.getElementById('preview-modal');
+const previewIframe = document.getElementById('preview-iframe');
+const previewTitle = document.getElementById('preview-title');
+const closePreviewBtn = document.getElementById('close-preview-btn');
+
+window.previewFile = (id, name) => {
+    previewTitle.textContent = name;
+    previewIframe.src = `/api/download/${id}?inline=true`;
+    previewModal.classList.remove('hidden');
+};
+
+closePreviewBtn.addEventListener('click', () => {
+    previewModal.classList.add('hidden');
+    previewIframe.src = ""; // Clear src to stop video/audio playing in background
+});
 
 window.deleteFile = async (id) => {
     if(!confirm("Are you sure you want to permanently delete this file from Cloud?")) return;
@@ -133,91 +178,119 @@ uploadForm.addEventListener('submit', async (e) => {
     
     if (fileInput.files.length === 0) return;
     
-    const file = fileInput.files[0];
-    const MAX_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
-    if (file.size > MAX_SIZE) {
-        showMsg('File size exceeds the 2GB limit.', true);
-        return;
-    }
+    currentAbortController = new AbortController();
+    const { signal } = currentAbortController;
     
+    const file = fileInput.files[0];
     btnUpload.disabled = true;
     btnUpload.textContent = "Uploading to Cloud...";
+    btnUpload.classList.add('opacity-50', 'cursor-not-allowed');
+    btnCancel.classList.remove('hidden');
     uploadMsg.classList.add('hidden');
 
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks to FastAPI
+    const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB chunks to FastAPI
     const TELEGRAM_PART_SIZE = 512 * 1024; // 512KB strict parts
-    // Calculate total 512KB parts for the ENTIRE file
-    const totalParts = Math.ceil(file.size / TELEGRAM_PART_SIZE);
-    
-    // Generate a pseudo-random 64-bit ID for Telegram
-    // Since JS numbers are double precision, we generate a large random integer
-    const fileId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-    
-    // Check if it's considered "Big" by Telegram (>10MB)
-    const isBig = file.size > 10 * 1024 * 1024;
+    const MAX_VOLUME_SIZE = 1.9 * 1024 * 1024 * 1024; // 1.9 GB per volume
 
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-    
+    const totalVolumes = Math.ceil(file.size / MAX_VOLUME_SIZE) || 1;
+    let messageIds = [];
+
     try {
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-            const start = chunkIndex * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
-            const chunk = file.slice(start, end);
+        for (let volIndex = 0; volIndex < totalVolumes; volIndex++) {
+            const volStart = volIndex * MAX_VOLUME_SIZE;
+            const volEnd = Math.min(volStart + MAX_VOLUME_SIZE, file.size);
+            const volSize = volEnd - volStart;
             
-            // Calculate which 512KB part index this chunk starts at
-            const startPartIndex = Math.floor(start / TELEGRAM_PART_SIZE);
+            const totalParts = Math.ceil(volSize / TELEGRAM_PART_SIZE);
+            const isBig = volSize > 10 * 1024 * 1024;
+            const fileId = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+            const totalChunks = Math.ceil(volSize / CHUNK_SIZE);
             
-            let chunkUploaded = false;
-            let retryCount = 0;
+            showMsg(`Preparing volume ${volIndex + 1} of ${totalVolumes}...`);
             
-            while (!chunkUploaded) {
-                try {
-                    const chunkData = new FormData();
-                    chunkData.append('file_id', fileId);
-                    chunkData.append('start_part_index', startPartIndex);
-                    chunkData.append('total_parts', totalParts);
-                    chunkData.append('is_big', isBig);
-                    chunkData.append('file', chunk);
-                    
-                    showMsg(`Uploading... ${Math.round((chunkIndex / totalChunks) * 100)}% (Chunk ${chunkIndex+1}/${totalChunks})`);
-                    
-                    const res = await fetch('/api/upload/chunk', {
-                        method: 'POST',
-                        body: chunkData
-                    });
-                    
-                    if (!res.ok) {
-                        const errorData = await res.json();
-                        throw new Error(errorData.detail || 'Chunk upload failed');
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                const chunkStart = chunkIndex * CHUNK_SIZE;
+                const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, volSize);
+                const chunk = file.slice(volStart + chunkStart, volStart + chunkEnd);
+                
+                const startPartIndex = Math.floor(chunkStart / TELEGRAM_PART_SIZE);
+                
+                let chunkUploaded = false;
+                let retryCount = 0;
+                
+                while (!chunkUploaded) {
+                    try {
+                        const chunkData = new FormData();
+                        chunkData.append('file_id', fileId);
+                        chunkData.append('start_part_index', startPartIndex);
+                        chunkData.append('total_parts', totalParts);
+                        chunkData.append('is_big', isBig);
+                        chunkData.append('file', chunk);
+                        
+                        showMsg(`Uploading Volume ${volIndex+1}/${totalVolumes}: ${Math.round((chunkIndex / totalChunks) * 100)}% (Chunk ${chunkIndex+1}/${totalChunks})`);
+                        
+                        const res = await fetch('/api/upload/chunk', {
+                            method: 'POST',
+                            body: chunkData,
+                            signal
+                        });
+                        
+                        if (!res.ok) {
+                            const errorData = await res.json();
+                            throw new Error(errorData.detail || 'Chunk upload failed');
+                        }
+                        chunkUploaded = true;
+                    } catch (err) {
+                        if (err.name === 'AbortError') {
+                            throw err; // Re-throw to cancel the entire upload process
+                        }
+                        retryCount++;
+                        console.error(`Chunk upload failed, retrying (${retryCount})...`, err);
+                        showMsg(`Network issue. Resuming... (Retry ${retryCount})`);
+                        await new Promise(resolve => setTimeout(resolve, 2000 * Math.min(retryCount, 5))); // Exponential backoff
                     }
-                    chunkUploaded = true;
-                } catch (err) {
-                    retryCount++;
-                    console.error(`Chunk upload failed, retrying (${retryCount})...`, err);
-                    showMsg(`Network issue. Resuming... (Retry ${retryCount})`);
-                    await new Promise(resolve => setTimeout(resolve, 2000 * Math.min(retryCount, 5))); // Exponential backoff
                 }
             }
+            
+            // Finalize this volume
+            showMsg(`Finalizing volume ${volIndex + 1} in Telegram...`);
+            const finalizeRes = await fetch('/api/upload/finalize_volume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_id: fileId,
+                    total_parts: totalParts,
+                    filename: file.name,
+                    is_big: isBig
+                }),
+                signal
+            });
+            
+            if (!finalizeRes.ok) {
+                const errorData = await finalizeRes.json();
+                throw new Error(errorData.detail || 'Volume finalization failed');
+            }
+            const finalizeData = await finalizeRes.json();
+            messageIds.push(finalizeData.message_id);
         }
         
-        // Finalize
-        showMsg('Finalizing upload in Telegram...');
-        const finalizeRes = await fetch('/api/upload/finalize', {
+        // Complete the entire file upload
+        showMsg('Completing file upload...');
+        const completeRes = await fetch('/api/upload/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                file_id: fileId,
-                total_parts: totalParts,
                 filename: file.name,
-                is_big: isBig,
                 file_size: file.size,
-                mime_type: file.type || "application/octet-stream"
-            })
+                mime_type: file.type || "application/octet-stream",
+                message_ids: messageIds
+            }),
+            signal
         });
-        
-        if (!finalizeRes.ok) {
-            const errorData = await finalizeRes.json();
-            throw new Error(errorData.detail || 'Finalization failed');
+
+        if (!completeRes.ok) {
+            const errorData = await completeRes.json();
+            throw new Error(errorData.detail || 'Upload completion failed');
         }
         
         showMsg('File successfully uploaded in Cloud!');
@@ -229,9 +302,16 @@ uploadForm.addEventListener('submit', async (e) => {
         loadFiles();
         
     } catch (err) {
-        showMsg(err.message, true);
+        if (err.name === 'AbortError') {
+            showMsg("Upload cancelled by user.", true);
+        } else {
+            showMsg(err.message, true);
+        }
     } finally {
+        currentAbortController = null;
         btnUpload.disabled = false;
         btnUpload.textContent = "Upload to Cloud";
+        btnUpload.classList.remove('opacity-50', 'cursor-not-allowed');
+        btnCancel.classList.add('hidden');
     }
 });

@@ -86,9 +86,14 @@
                     </label>
                 </div>
                 
-                <button type="submit" id="btn-upload" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2 rounded-lg transition-all shadow-lg hover:shadow-indigo-500/25">
-                    Upload to Cloud
-                </button>
+                <div class="flex space-x-3">
+                    <button type="submit" id="btn-upload" class="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2 rounded-lg transition-all shadow-lg hover:shadow-indigo-500/25">
+                        Upload to Cloud
+                    </button>
+                    <button type="button" id="btn-cancel" class="hidden flex-1 bg-slate-700 hover:bg-red-600 text-white font-medium py-2 rounded-lg transition-all border border-slate-600 hover:border-red-500 shadow-lg">
+                        Cancel Upload
+                    </button>
+                </div>
             </form>
         </div>
 
@@ -100,6 +105,22 @@
             </ul>
         </div>
 
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="preview-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl relative overflow-hidden">
+            <div class="flex justify-between items-center p-4 border-b border-slate-700/50 bg-slate-900/80">
+                <h3 id="preview-title" class="text-lg font-semibold text-slate-200 truncate pr-4">Preview</h3>
+                <button id="close-preview-btn" class="p-2 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg transition-colors border border-transparent hover:border-red-500/30">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="flex-1 bg-black overflow-hidden relative">
+                <!-- Iframe for native browser rendering of images/videos/audio -->
+                <iframe id="preview-iframe" class="w-full h-full border-none" src=""></iframe>
+            </div>
+        </div>
     </div>
 
     <script src="/js/dashboard.js"></script>
