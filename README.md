@@ -1,49 +1,53 @@
 # Telegram Cloud Storage Web App (MVP)
 
-A modern, fast, and scalable cloud storage web application that uses **Telegram** as the backend storage layer. Uploaded files are securely stored inside a private Telegram channel automatically created for each user, while lightweight metadata is managed locally via a SQL database.
+A modern, fast, and scalable cloud storage web application that uses **Telegram** as an unlimited backend storage layer. Uploaded files are securely stored inside a private Telegram channel automatically created for each user, while lightweight metadata is managed locally via a **MySQL** database.
 
-## Current Progress
+This project supports **unlimited file sizes** (bypassing Telegram's standard 2GB limit) by automatically chunking, streaming, and parallelizing uploads and downloads natively in the browser and backend.
 
-### Phase 1: Project Foundation & Authentication (Completed)
-- Configured FastAPI project structure with SQLAlchemy (SQLite for local dev, production-ready for MySQL).
-- Implemented secure JWT-based authentication and bcrypt password hashing.
-- Built User Registration, Login, and protected Dashboard APIs.
-- Applied modern, dark glassmorphism styling for the frontend using Tailwind CSS.
+## 🚀 Key Features
 
-### Phase 2: Telegram Account Integration (Completed)
-- Integrated `Telethon` for asynchronous Telegram communication.
-- Built a streamlined UI for users to connect their Telegram account securely via **QR Code scanning** (replacing legacy OTP).
-- Automatically provisions a private "Personal Cloud Storage" Telegram channel upon linking.
-- Securely stores the Telegram Session String, User ID, and Channel ID strictly on the backend database (no session keys exposed to frontend).
+### Authentication & Security
+- **JWT Based Authentication**: Secure, 6-month expiry JSON Web Tokens.
+- **QR Code Telegram Login**: Securely links a user's Telegram account without exposing phone numbers or passing OTPs through the frontend.
+- **AES/Fernet Encryption**: Telegram Session Strings are heavily encrypted at rest in the database using your `JWT_SECRET_KEY`. Session data is strictly kept on the backend.
+- **MySQL Database**: Robust relational architecture utilizing `users`, `files`, and `file_parts` tables.
 
-### Phase 3: File Upload (Completed)
-- Built a dedicated file upload API (`/api/upload`) that receives multipart form data.
-- Uploaded files are temporarily cached on the server, pushed to the user's private Telegram channel asynchronously, and immediately deleted from the server to ensure zero local footprint.
-- Saved lightweight metadata (`FileRecord`) in the local database including filename, size, and the Telegram `message_id` for future retrieval.
-- Updated the Dashboard UI with a drag-and-drop enabled Tailwind CSS upload form and live progress state.
+### Unlimited Uploads & Parallelization
+- **Bypasses 2GB Limit**: Files larger than 1.9GB are automatically split into "volumes" in the browser and sequentially tracked in the database.
+- **Chunked Uploads**: The frontend securely slices files into 15MB chunks.
+- **Parallel Telegram Streaming**: The FastAPI backend takes incoming 15MB chunks, splits them into Telegram's strict 512KB pieces, and fires them to Telegram **concurrently** using `asyncio.gather()`, drastically improving upload speeds.
+- **Zero Local Footprint**: Data streams instantly into Telegram memory buffers. Nothing is ever saved to the server's hard drive.
 
-### Phase 4: File Management (Completed)
-- Users can view a list of all files uploaded during their session via the `/api/files` endpoint.
-- Implemented file downloading via FastAPI `StreamingResponse` which leverages Telethon's `iter_download()` to stream the file directly from Telegram to the user, completely bypassing local disk storage.
-- Added file deletion support: instantly deletes the Telegram message and cleans up the local MySQL/SQLite `FileRecord`.
+### Seamless Downloads
+- **Chained Async Generators**: When downloading a file larger than 1.9GB, the backend dynamically queries the `file_parts` table and streams the segmented Telegram messages back to the user as a single, contiguous file download.
 
-### Phase 5: Testing & Finalization (Completed)
-- Re-architected project into a clear `frontend/` (Static HTML/JS/CSS) and `backend/` (FastAPI JSON APIs) separation.
-- Completely migrated from Jinja2 templates to pure REST API architecture.
-- Replaced OTP flow with a secure QR Code polling mechanism (`qrcode.js`).
-- Improved Error handling, JWT token management, and automatic Telegram session validation (`is_telegram_connected` boolean flag).
-- Standardized database column naming to `users` and `files` according to the core requirements.
-- Polished the modern web UI for seamless AJAX workflow (Login -> QR Scan -> Upload -> Download -> Delete).
-- Pinned `bcrypt==3.2.2` to resolve `passlib` compatibility issues with modern bcrypt versions.
+### Modern UI
+- Built with **Vanilla HTML, JavaScript, and Tailwind CSS**.
+- **Dark Glassmorphism** aesthetics.
+- Real-time progress bars, volume tracking, and network retry logic integrated into the frontend.
 
-## Prerequisites
+---
+
+## 🏗️ Architecture
+
+- **Frontend**: HTML5, Vanilla JS, Tailwind CSS (via CDN). Served as static files by FastAPI.
+- **Backend**: Python 3.10+, FastAPI, Uvicorn.
+- **Database**: MySQL (SQLAlchemy ORM).
+- **Telegram Client**: Telethon (Asyncio).
+
+---
+
+## ⚙️ Prerequisites
+
 - Python 3.10+
 - Telegram API Credentials (`API_ID` and `API_HASH`) from [my.telegram.org](https://my.telegram.org).
-- MySQL Server (optional for production, SQLite used by default).
+- MySQL Server running on `localhost:3306` (or remotely).
 
-## Installation and Setup
+---
 
-1. **Clone the repository and prepare the virtual environment.**
+## 🛠️ Installation and Setup
+
+1. **Clone the repository and prepare the virtual environment:**
    ```bash
    cd backend
    python -m venv venv
@@ -61,19 +65,34 @@ A modern, fast, and scalable cloud storage web application that uses **Telegram*
    ```
 
 3. **Configure Environment Variables:**
-   - Open the `.env` file located in the `backend/` directory.
-   - Insert your Telegram API credentials (required to use the Telethon client):
-     ```env
-     TG_API_ID=your_api_id
-     TG_API_HASH=your_api_hash
-     JWT_SECRET=your_jwt_secret_key
-     ```
+   Create or open the `.env` file located in the `backend/` directory:
+   ```env
+   # Telegram App Credentials
+   TG_API_ID=your_api_id
+   TG_API_HASH=your_api_hash
+   
+   # Security
+   JWT_SECRET_KEY=your_very_long_random_secret_string
+   
+   # MySQL Database Connection
+   DB_USER=root
+   DB_PASSWORD=your_password
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_NAME=cloud_db
+   ```
 
-4. **Initialize Database:**
-   - The SQLite database (`auth_app.db`) will be automatically created in the root directory upon startup. If you wish to use MySQL, configure the variables inside `backend/.env`.
+4. **Initialize MySQL Database:**
+   - Ensure your MySQL service (e.g. XAMPP) is running.
+   - You **do not** need to create the database manually. Just ensure your MySQL credentials in `.env` are correct.
+   - The application will automatically create the `cloud_db` database and build the `users`, `files`, and `file_parts` tables upon startup.
 
 5. **Run the Server:**
    ```bash
    python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
    ```
    *Note: The frontend is served as static files from the FastAPI app directly (no Node.js required).*
+
+## ⚠️ Notes for Deployment
+- Ensure `JWT_SECRET_KEY` is highly secure in production as it encrypts the Telegram sessions.
+- In production, it is highly recommended to run FastAPI behind a reverse proxy (like Nginx) and configure HTTPS to secure the JWT cookies and chunked data transfers.
