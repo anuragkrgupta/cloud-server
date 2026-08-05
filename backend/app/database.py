@@ -6,12 +6,21 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 from app.config import settings
 
-connect_args = {"check_same_thread": False} if settings.USE_SQLITE else {}
+import sqlalchemy
+
+# Ensure the database exists before connecting to it
+def _ensure_database_exists():
+    base_url = f"mysql+pymysql://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/"
+    temp_engine = create_engine(base_url)
+    with temp_engine.connect() as conn:
+        conn.execute(sqlalchemy.text(f"CREATE DATABASE IF NOT EXISTS {settings.DB_NAME}"))
+    temp_engine.dispose()
+
+_ensure_database_exists()
 
 # pool_pre_ping avoids "MySQL server has gone away" errors on idle connections
 engine = create_engine(
     settings.DATABASE_URL,
-    connect_args=connect_args,
     pool_pre_ping=True,
     pool_recycle=3600,
 )
