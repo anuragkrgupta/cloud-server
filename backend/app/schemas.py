@@ -75,7 +75,7 @@ class FileOut(BaseModel):
     id: int
     original_name: str
     file_size: int
+    mime_type: str | None = None
     uploaded_at: datetime
-    telegram_message_id: int
     
     model_config = ConfigDict(from_attributes=True)
