@@ -165,9 +165,26 @@ async def download_file_stream(session_string: str, channel_id: str, message_id:
         if not message or not message.media:
             raise Exception("Media not found in the specified message.")
             
-        async for chunk in client.iter_download(message.media):
-            yield chunk
+        request_size = 1024 * 1024  # 1MB chunks
+        total_size = message.document.size
+        
+        async def fetch_chunk(offset):
+            async for chunk in client.iter_download(message.media, offset=offset, limit=1, request_size=request_size):
+                return chunk
+            return b""
+
+        CONCURRENT_CHUNKS = 8  # 8MB buffered per active download stream
+        
+        for batch_start in range(0, total_size, request_size * CONCURRENT_CHUNKS):
+            tasks = []
+            for offset in range(batch_start, min(total_size, batch_start + request_size * CONCURRENT_CHUNKS), request_size):
+                tasks.append(fetch_chunk(offset))
+                
+            chunks = await asyncio.gather(*tasks)
             
+            for chunk in chunks:
+                if chunk:
+                    yield chunk
     finally:
         await client.disconnect()
 
@@ -210,23 +227,27 @@ async def upload_chunk_to_telegram(
     try:
         PART_SIZE = 524288  # 512KB
         
+        tasks = []
         for i in range(0, len(chunk_data), PART_SIZE):
             part_data = chunk_data[i:i+PART_SIZE]
             current_part_index = start_part_index + (i // PART_SIZE)
             
             if is_big:
-                await client(SaveBigFilePartRequest(
+                tasks.append(client(SaveBigFilePartRequest(
                     file_id=file_id,
                     file_part=current_part_index,
                     file_total_parts=total_parts,
                     bytes=part_data
-                ))
+                )))
             else:
-                await client(SaveFilePartRequest(
+                tasks.append(client(SaveFilePartRequest(
                     file_id=file_id,
                     file_part=current_part_index,
                     bytes=part_data
-                ))
+                )))
+        
+        # Run all 512KB part uploads concurrently!
+        await asyncio.gather(*tasks)
     finally:
         await client.disconnect()
 
