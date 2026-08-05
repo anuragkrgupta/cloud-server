@@ -28,14 +28,8 @@ class Settings:
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_NAME: str = os.getenv("DB_NAME", "auth_app")
 
-    # SQLite Fallback for local testing
-    USE_SQLITE: bool = os.getenv("USE_SQLITE", "true").lower() == "true"
-    SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH", "./auth_app.db")
-
     @property
     def DATABASE_URL(self) -> str:
-        if self.USE_SQLITE:
-            return f"sqlite:///{self.SQLITE_DB_PATH}"
         return (
             f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
