@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "D:\CODES\PROJECTS\cloud server\backend\app\routes\files.py", line 58, in upload_chunk
+    await upload_chunk_to_telegram(
+  File "D:\CODES\PROJECTS\cloud server\backend\app\services\telegram_service.py", line 199, in upload_chunk_to_telegram
+NameError: name 'get_telegram_client' is not defined. Did you mean: 'TelegramClient'?

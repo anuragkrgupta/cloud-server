@@ -165,26 +165,9 @@ async def download_file_stream(session_string: str, channel_id: str, message_id:
         if not message or not message.media:
             raise Exception("Media not found in the specified message.")
             
-        request_size = 1024 * 1024  # 1MB chunks
-        total_size = message.document.size
-        
-        async def fetch_chunk(offset):
-            async for chunk in client.iter_download(message.media, offset=offset, limit=1, request_size=request_size):
-                return chunk
-            return b""
-
-        CONCURRENT_CHUNKS = 8  # 8MB buffered per active download stream
-        
-        for batch_start in range(0, total_size, request_size * CONCURRENT_CHUNKS):
-            tasks = []
-            for offset in range(batch_start, min(total_size, batch_start + request_size * CONCURRENT_CHUNKS), request_size):
-                tasks.append(fetch_chunk(offset))
-                
-            chunks = await asyncio.gather(*tasks)
+        async for chunk in client.iter_download(message.media):
+            yield chunk
             
-            for chunk in chunks:
-                if chunk:
-                    yield chunk
     finally:
         await client.disconnect()
 

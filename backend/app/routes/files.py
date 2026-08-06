@@ -40,6 +40,26 @@ class CompleteUploadParams(BaseModel):
 
 router = APIRouter()
 
+def handle_telegram_error(e: Exception, db: Session, current_user: User):
+    error_name = type(e).__name__
+    expired_errors = [
+        "AuthKeyUnregisteredError", "SessionExpiredError", "SessionRevokedError", 
+        "UserDeactivatedError", "UserDeactivatedBanError", "UnauthorizedError"
+    ]
+    if any(err in error_name for err in expired_errors):
+        current_user.telegram_session = None
+        current_user.channel_id = None
+        current_user.is_telegram_connected = False
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Telegram session expired or revoked. Please reconnect your account."
+        )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+        detail=f"Telegram operation failed: {str(e)}"
+    )
+
 @router.post("/api/upload/chunk")
 async def upload_chunk(
     file_id: int = Form(...),
@@ -65,7 +85,7 @@ async def upload_chunk(
         )
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to upload chunk: {str(e)}")
+        handle_telegram_error(e, db, current_user)
 
 @router.post("/api/upload/finalize_volume")
 async def finalize_volume(
@@ -87,7 +107,7 @@ async def finalize_volume(
         )
         return {"message_id": msg_id}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to finalize volume: {str(e)}")
+        handle_telegram_error(e, db, current_user)
 
 @router.post("/api/upload/complete", response_model=FileOut)
 def complete_upload(
@@ -130,7 +150,6 @@ def get_files(db: Session = Depends(get_db), current_user: User = Depends(get_cu
 @router.get("/api/download/{file_id}")
 async def download_file(
     file_id: int, 
-    inline: bool = False,
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
@@ -143,25 +162,20 @@ async def download_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         
     try:
-        # Eagerly extract needed fields while DB session is open
-        telegram_session = current_user.telegram_session
-        channel_id = current_user.channel_id
-        part_message_ids = [p.telegram_message_id for p in sorted(file_record.parts, key=lambda p: p.part_index)]
-
         async def combined_stream():
-            for message_id in part_message_ids:
+            parts = sorted(file_record.parts, key=lambda p: p.part_index)
+            for part in parts:
                 stream = download_file_stream(
-                    session_string=telegram_session,
-                    channel_id=channel_id,
-                    message_id=message_id
+                    session_string=current_user.telegram_session,
+                    channel_id=current_user.channel_id,
+                    message_id=part.telegram_message_id
                 )
                 async for chunk in stream:
                     yield chunk
 
         safe_filename = urllib.parse.quote(file_record.original_name)
-        disposition = "inline" if inline else "attachment"
         headers = {
-            "Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_filename}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"
         }
         
         return StreamingResponse(combined_stream(), media_type=file_record.mime_type, headers=headers)
@@ -194,4 +208,4 @@ async def delete_file(
         db.commit()
         return Message(message="File deleted successfully.")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete file: {str(e)}")
+        handle_telegram_error(e, db, current_user)
