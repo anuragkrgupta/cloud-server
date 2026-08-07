@@ -86,6 +86,7 @@ This project supports **unlimited file sizes** (bypassing Telegram's standard 2G
    - Ensure your MySQL service (e.g. XAMPP) is running.
    - You **do not** need to create the database manually. Just ensure your MySQL credentials in `.env` are correct.
    - The application will automatically create the `cloud_db` database and build the `users`, `files`, and `file_parts` tables upon startup.
+   - **Note:** Do NOT manually import `schema.sql` or `database/schema.sql`. The SQLAlchemy ORM manages the schema automatically and will create all required tables upon first start.
 
 5. **Run the Server:**
    ```bash

@@ -26,7 +26,7 @@ class Settings:
     DB_PORT: str = os.getenv("DB_PORT", "3306")
     DB_USER: str = os.getenv("DB_USER", "root")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
-    DB_NAME: str = os.getenv("DB_NAME", "auth_app")
+    DB_NAME: str = os.getenv("DB_NAME", "cloud_db")
 
     @property
     def DATABASE_URL(self) -> str:
