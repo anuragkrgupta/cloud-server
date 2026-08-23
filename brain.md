@@ -147,60 +147,33 @@ On match: nulls telegram_session + channel_id in DB, returns HTTP 401.
 
 ---
 
-## 5. Upload Flow
+## 5. Upload Flow (Streaming & Parallel Multiplexing)
 
-### End-to-end sequence
+The upload pipeline bypasses Telegram's single-connection speed limits and memory constraints through a highly optimized raw-streaming architecture with TCP backpressure.
 
 ```
-Browser picks file
-  |
-  |  JS splits file into volumes (<=1.9 GB each)
-  |
-  +-> For each volume:
-  |     |
-  |     |  JS splits volume into chunks (e.g. 5 MB each)
-  |     |  JS generates random file_id (safe int53) for this volume
-  |     |  JS computes total_parts = ceil(volume_size / 524288)
-  |     |
-  |     +-> POST /api/upload/chunk  [repeated per chunk]
-  |     |     form fields: file_id, start_part_index, total_parts, is_big
-  |     |     file field:  raw binary chunk
-  |     |     backend: _get_upload_client(file_id) -> reuse or create TelegramClient
-  |     |     backend: splits chunk into 512KB pieces, sends sequentially
-  |     |
-  |     +-> POST /api/upload/finalize_volume
-  |           body: { file_id, total_parts, filename, is_big }
-  |           backend: sends InputFileBig/InputFile to channel as document message
-  |           backend: disconnects + removes client from _upload_clients pool
-  |           response: { message_id: <int> }
-  |
-  +-> POST /api/upload/complete
-        body: { filename, file_size, mime_type, message_ids: [id1, id2, ...] }
-        backend: creates FileRecord + FilePartRecord(s) in MySQL
-        response: FileOut
+Browser -> POST /api/upload/stream (Raw Body) -> Backend -> Telegram
 ```
 
-### is_big flag
-- True when volume has more than 10 Telegram parts (>~5 MB)
-- Telegram API requires SaveBigFilePartRequest for files >10 MB; SaveFilePartRequest for smaller
-- Frontend computes and passes this correctly
+1. **Volume Slicing (Frontend):**
+   If a file > 1.9 GB, the frontend slices it into "volumes" (File/Blob slice) to respect Telegram's 2GB file limit.
+2. **Raw Streaming (Frontend):**
+   The frontend uses `XMLHttpRequest.send(file_volume)` to stream the raw bytes natively over a single HTTP connection. No artificial chunking overhead.
+3. **TCP Backpressure (Backend):**
+   The backend route `/api/upload/stream` reads the `request.stream()` directly. It only drains bytes from the client's TCP buffer as fast as it can push them to Telegram. This natively throttles the browser's upload speed to the true internet speed, making the frontend progress bar 100% accurate.
+4. **Parallel Upload Multiplexing (Backend):**
+   As the backend streams bytes from the browser, it chops them into 512 KB Telegram-mandated chunks and dispatches them via `asyncio.create_task()` to be uploaded simultaneously. Up to 8 chunks (4MB) are processed in parallel to max out the outbound bandwidth, eliminating Telegram's sequential ping latency.
+5. **Finalization:**
+   After the stream finishes, `finalize_telegram_upload` is called to assemble the parts into a document message in the private channel, returning the `message_id`.
+6. **DB Commit:**
+   Frontend calls `POST /api/upload/complete` with the array of `message_ids` (one per volume) to link them to a single `FileRecord` in MySQL.
 
-### Persistent upload client pool
+### Connection Lifecycle & Leak Prevention
 ```python
 # telegram_service.py module-level
 _upload_clients: dict[int, dict] = {}
-# key   = file_id (int)
-# value = {"client": TelegramClient, "lock": asyncio.Lock}
 ```
-
-Lifecycle:
-1. First chunk for file_id -> _get_upload_client() creates + connects TelegramClient, stores in pool
-2. Subsequent chunks for same file_id -> reuse existing connected client (no reconnect)
-3. finalize_telegram_upload() -> sends file to channel, then disconnects + pops from pool
-
-Lock per entry ensures sequential part sending even if somehow two requests for same file_id arrive concurrently.
-
-WARNING: If finalize is never called (abandoned upload), the client leaks indefinitely.
+The streaming route uses a `try...finally` block. If the browser connection drops or the user cancels the upload mid-stream, the `finally` block is guaranteed to execute. This gracefully disconnects the Telethon client and evicts it from the `_upload_clients` pool, guaranteeing **zero connection leaks**.
 
 ---
 
@@ -313,11 +286,6 @@ SQLAlchemy engine options:
 
 ## 10. Known Gotchas & Bugs
 
-### Upload client pool leak
-Abandoned uploads (browser closed mid-upload, network drop) never trigger finalize_telegram_upload.
-The TelegramClient for that file_id stays in _upload_clients forever.
-No cleanup mechanism exists currently.
-
 ### _ensure_database_exists() is commented out
 database.py has a utility that auto-creates cloud_db, but it's disabled (commented out).
 The database must be created manually with: CREATE DATABASE IF NOT EXISTS cloud_db;
@@ -329,10 +297,6 @@ Users mid-QR-scan must start over.
 ### telegram_file_id column is unused
 FileRecord has a telegram_file_id column that is never written to.
 The current design uses telegram_message_id in FilePartRecord instead.
-
-### No Content-Length header on downloads
-StreamingResponse with an async generator has no known total size.
-The browser shows indeterminate download progress. file_size is in the DB and could be sent as a header.
 
 ### is_telegram_connected assignment is a no-op
 handle_telegram_error() in files.py sets current_user.is_telegram_connected = False.

@@ -94,13 +94,31 @@ CREATE DATABASE IF NOT EXISTS cloud_db;
 
 All tables are created automatically by SQLAlchemy on first startup.
 
-### 5. Run the server
+### 5. Starting the Server
 
+Every time you want to start or resume working on your cloud server, follow these exact steps:
+
+**Step 1: Start the Database**
+Because this app relies on MySQL, your database must be running first.
+1. Open your database manager (like **XAMPP Control Panel** or Docker).
+2. Start the **MySQL** module.
+3. Ensure it is running on the port specified in your `.env` (default is `3307`).
+
+**Step 2: Start the Python Backend**
+Open a terminal in the `backend` directory, activate your virtual environment, and start the Uvicorn server:
 ```bash
+cd backend
+.\venv\Scripts\activate   # For Windows
+# source venv/bin/activate  # For Mac/Linux
+
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open **http://localhost:8000**. No Node.js or build step needed.
+**Step 3: Access the App**
+Open your browser and navigate to:
+**http://localhost:8000**
+
+*(No Node.js, npm, or frontend build steps are required. The HTML/JS is served instantly by FastAPI).*
 
 ---
 
