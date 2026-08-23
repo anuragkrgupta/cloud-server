@@ -1,4 +1,4 @@
-﻿# Telegram Cloud Storage Web App
+# Telegram Cloud Storage Web App
 
 A cloud storage web application that uses **Telegram** as an unlimited backend storage layer. Uploaded files are stored inside a private Telegram channel created automatically for each user, while metadata is managed locally via a **MySQL** database.
 
@@ -14,10 +14,10 @@ Files of any size are supported by automatically chunking, streaming, and reasse
 
 ### Uploads
 - **Bypasses 2GB limit** — Files > 1.9 GB are split into sequential "volumes".
-- **Chunked uploads** — Frontend slices files into chunks, POSTed to `/api/upload/chunk`.
-- **Persistent connection pool** — One `TelegramClient` per active upload; reused for every chunk (no per-chunk TLS reconnect).
-- **Sequential part sending** — 512 KB parts sent sequentially on the shared connection. Parallel calls trigger Telegram flood-waits.
-- **Zero local footprint** — Nothing written to disk.
+- **Raw Streaming** — Frontend streams raw bytes directly to `/api/upload/stream`, eliminating chunk overhead.
+- **Shared Connection Pool** — One `TelegramClient` per user, cached and locked to prevent `AuthKeyDuplicatedError`. Disconnected cleanly on server shutdown.
+- **Sequential Part Sending** — 512 KB parts are uploaded sequentially to Telegram. This prevents aggressive MTProto socket closures (WinError 10054) and wrong session ID security errors.
+- **Zero Local Footprint** — Nothing is written to the server's disk.
 
 ### Downloads
 - **Single-connection streaming** — `iter_download` streams directly to the HTTP response.
@@ -133,8 +133,8 @@ Open your browser and navigate to:
 | `POST` | `/api/telegram/qr-start` | Start QR login flow |
 | `GET` | `/api/telegram/qr-status` | Poll QR login status |
 | `POST` | `/api/telegram/2fa` | Submit 2FA password |
-| `POST` | `/api/upload/chunk` | Upload a file chunk |
-| `POST` | `/api/upload/finalize_volume` | Finalize a volume |
+| `POST` | `/api/telegram/disconnect` | Clear Telegram session |
+| `POST` | `/api/upload/stream` | Stream raw file bytes |
 | `POST` | `/api/upload/complete` | Save file record to DB |
 | `GET` | `/api/files` | List files |
 | `GET` | `/api/download/{file_id}` | Stream download |

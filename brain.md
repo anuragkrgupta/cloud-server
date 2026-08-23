@@ -1,4 +1,4 @@
-﻿# brain.md — Developer Reference
+# brain.md — Developer Reference
 
 Deep-dive technical reference for the Telegram Cloud Storage project. Covers the full architecture, data flows, security model, known gotchas, and areas for future improvement.
 
@@ -161,19 +161,22 @@ Browser -> POST /api/upload/stream (Raw Body) -> Backend -> Telegram
    The frontend uses `XMLHttpRequest.send(file_volume)` to stream the raw bytes natively over a single HTTP connection. No artificial chunking overhead.
 3. **TCP Backpressure (Backend):**
    The backend route `/api/upload/stream` reads the `request.stream()` directly. It only drains bytes from the client's TCP buffer as fast as it can push them to Telegram. This natively throttles the browser's upload speed to the true internet speed, making the frontend progress bar 100% accurate.
-4. **Parallel Upload Multiplexing (Backend):**
-   As the backend streams bytes from the browser, it chops them into 512 KB Telegram-mandated chunks and dispatches them via `asyncio.create_task()` to be uploaded simultaneously. Up to 8 chunks (4MB) are processed in parallel to max out the outbound bandwidth, eliminating Telegram's sequential ping latency.
+4. **Sequential Chunk Upload (Backend):**
+   As the backend streams bytes from the browser, it chops them into 512 KB Telegram-mandated chunks and uploads them sequentially over a dedicated shared connection. Sequential uploading guarantees 100% stability against Telegram's anti-flood socket drops (WinError 10054) and prevents `SecurityError` (wrong session ID) that occurs with overly aggressive parallel RPC multiplexing.
 5. **Finalization:**
-   After the stream finishes, `finalize_telegram_upload` is called to assemble the parts into a document message in the private channel, returning the `message_id`.
+   After the stream finishes, the backend instantly issues a final send command to assemble the parts into a document message in the private channel, returning the `message_id`.
 6. **DB Commit:**
    Frontend calls `POST /api/upload/complete` with the array of `message_ids` (one per volume) to link them to a single `FileRecord` in MySQL.
 
 ### Connection Lifecycle & Leak Prevention
 ```python
 # telegram_service.py module-level
-_upload_clients: dict[int, dict] = {}
+_client_cache: dict[str, TelegramClient] = {}
+_client_locks: dict[str, asyncio.Lock] = {}
 ```
-The streaming route uses a `try...finally` block. If the browser connection drops or the user cancels the upload mid-stream, the `finally` block is guaranteed to execute. This gracefully disconnects the Telethon client and evicts it from the `_upload_clients` pool, guaranteeing **zero connection leaks**.
+To prevent `AuthKeyDuplicatedError` (which occurs when multiple TelegramClient instances attempt to connect simultaneously with the same session string), the backend uses a globally locked `_client_cache`. All uploads and downloads for a specific user share the exact same `TelegramClient` instance.
+
+Furthermore, a global `shutdown` event hook in `main.py` triggers `disconnect_all_clients()` when the uvicorn server reloads or shuts down. This forces a clean disconnect of the MTProto socket, preventing dangling connections that would otherwise cause Telegram to ban the auth key on the next restart.
 
 ---
 
@@ -307,9 +310,9 @@ The real fix (telegram_session = None) is already done on the previous line.
 
 ## 11. Areas for Future Improvement
 
-### Upload pool TTL cleanup
-Run an asyncio background task that evicts entries from _upload_clients idle for >5 minutes.
-Prevents connection leaks from abandoned uploads.
+### Graceful connection recovery
+If the backend crashes or reloads, ongoing stream uploads will fail.
+While the client is shared, adding volume-level resume logic could allow the frontend to retry the specific volume instead of the entire file.
 
 ### Content-Length on downloads
 ```python
@@ -321,9 +324,9 @@ Enables native browser download progress bars. file_size is already stored.
 Move pending_logins to Redis or a temporary DB table.
 Critical for production where restarts must not invalidate ongoing logins.
 
-### Per-chunk retry without full restart
-Frontend should retry only the failed chunk, not restart the entire file.
-The server-side pool supports this already (connection stays open between chunks).
+### Volume-level retry on stream failure
+If a streaming upload fails mid-transfer, the frontend currently has to restart the entire volume.
+Implementing byte-range resume support would allow continuing the upload exactly where it dropped.
 
 ### Rate limiting on auth endpoints
 /api/register and /api/login have no throttling.
