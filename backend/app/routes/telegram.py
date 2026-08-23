@@ -4,10 +4,34 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 from app.auth import get_current_user
-from app.schemas import TelegramQRStartResponse, TelegramQRStatusResponse, Message
-from app.services.telegram_service import start_qr_login, check_qr_login_status
+from app.schemas import TelegramQRStartResponse, TelegramQRStatusResponse, Message, Telegram2FARequest
+from app.services.telegram_service import start_qr_login, check_qr_login_status, submit_qr_password
 
 router = APIRouter()
+
+@router.post("/api/telegram/2fa", response_model=TelegramQRStatusResponse)
+async def api_submit_2fa(req: Telegram2FARequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        info = await submit_qr_password(req.token, req.password)
+        if info["status"] == "success":
+            from app.auth import encrypt_telegram_session
+            current_user.telegram_session = encrypt_telegram_session(info["session_string"])
+            current_user.telegram_user_id = info["tg_user_id"]
+            current_user.channel_id = info["channel_id"]
+            db.commit()
+            return TelegramQRStatusResponse(status="success", message="2FA successful. Telegram account connected and private channel created.")
+        elif info["status"] == "failed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to verify 2FA password: {info.get('error', 'Unknown error')}"
+            )
+        else:
+            return TelegramQRStatusResponse(status=info["status"], message="Invalid state or token.")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to submit 2FA: {str(e)}"
+        )
 
 @router.post("/api/telegram/qr-start", response_model=TelegramQRStartResponse)
 async def api_qr_start(current_user: User = Depends(get_current_user)):
@@ -42,3 +66,10 @@ async def api_qr_status(token: str, db: Session = Depends(get_db), current_user:
             )
             
     return TelegramQRStatusResponse(status=info["status"])
+
+@router.post("/api/telegram/disconnect")
+async def api_telegram_disconnect(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    current_user.telegram_session = None
+    current_user.telegram_user_id = None
+    db.commit()
+    return {"status": "success", "message": "Telegram disconnected"}

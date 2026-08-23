@@ -11,103 +11,20 @@ from app.database import get_db
 from app.models import User, FileRecord, FilePartRecord
 from app.auth import get_current_user
 from app.schemas import FileOut, Message
-from app.services.telegram_service import (
-    upload_file_to_telegram, 
+from app.services.telegram_service import ( 
     download_file_stream, 
+    download_multiple_messages_stream,
     delete_file_from_telegram,
-    upload_chunk_to_telegram,
-    finalize_telegram_upload
 )
 from pydantic import BaseModel
 
-class ChunkUploadParams(BaseModel):
-    file_id: int
-    start_part_index: int
-    total_parts: int
-    is_big: bool
-
-class FinalizeVolumeParams(BaseModel):
-    file_id: int
-    total_parts: int
-    filename: str
-    is_big: bool
+router = APIRouter()
 
 class CompleteUploadParams(BaseModel):
     filename: str
     file_size: int
     mime_type: str
     message_ids: List[int]
-
-router = APIRouter()
-
-def handle_telegram_error(e: Exception, db: Session, current_user: User):
-    error_name = type(e).__name__
-    expired_errors = [
-        "AuthKeyUnregisteredError", "SessionExpiredError", "SessionRevokedError", 
-        "UserDeactivatedError", "UserDeactivatedBanError", "UnauthorizedError"
-    ]
-    if any(err in error_name for err in expired_errors):
-        current_user.telegram_session = None
-        current_user.channel_id = None
-        current_user.is_telegram_connected = False
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Telegram session expired or revoked. Please reconnect your account."
-        )
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-        detail=f"Telegram operation failed: {str(e)}"
-    )
-
-@router.post("/api/upload/chunk")
-async def upload_chunk(
-    file_id: int = Form(...),
-    start_part_index: int = Form(...),
-    total_parts: int = Form(...),
-    is_big: bool = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if not current_user.telegram_session or not current_user.channel_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
-
-    try:
-        chunk_data = await file.read()
-        await upload_chunk_to_telegram(
-            session_string=current_user.telegram_session,
-            file_id=file_id,
-            start_part_index=start_part_index,
-            total_parts=total_parts,
-            chunk_data=chunk_data,
-            is_big=is_big
-        )
-        return {"status": "success"}
-    except Exception as e:
-        handle_telegram_error(e, db, current_user)
-
-@router.post("/api/upload/finalize_volume")
-async def finalize_volume(
-    params: FinalizeVolumeParams,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if not current_user.telegram_session or not current_user.channel_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
-
-    try:
-        msg_id = await finalize_telegram_upload(
-            session_string=current_user.telegram_session,
-            channel_id=current_user.channel_id,
-            file_id=params.file_id,
-            total_parts=params.total_parts,
-            filename=params.filename,
-            is_big=params.is_big
-        )
-        return {"message_id": msg_id}
-    except Exception as e:
-        handle_telegram_error(e, db, current_user)
 
 @router.post("/api/upload/complete", response_model=FileOut)
 def complete_upload(
@@ -162,23 +79,27 @@ async def download_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         
     try:
-        async def combined_stream():
-            parts = sorted(file_record.parts, key=lambda p: p.part_index)
-            for part in parts:
-                stream = download_file_stream(
-                    session_string=current_user.telegram_session,
-                    channel_id=current_user.channel_id,
-                    message_id=part.telegram_message_id
-                )
-                async for chunk in stream:
-                    yield chunk
+        # Load parts before returning so we don't hit DetachedInstanceError 
+        # when the async generator runs after the db session is closed.
+        parts = sorted(file_record.parts, key=lambda p: p.part_index)
+        message_ids = [part.telegram_message_id for part in parts]
+        
+        async def combined_stream(msg_ids):
+            stream = download_multiple_messages_stream(
+                session_string=current_user.telegram_session,
+                channel_id=current_user.channel_id,
+                message_ids=msg_ids
+            )
+            async for chunk in stream:
+                yield chunk
 
         safe_filename = urllib.parse.quote(file_record.original_name)
         headers = {
-            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
+            "Content-Length": str(file_record.file_size),
         }
         
-        return StreamingResponse(combined_stream(), media_type=file_record.mime_type, headers=headers)
+        return StreamingResponse(combined_stream(message_ids), media_type=file_record.mime_type, headers=headers)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stream file: {str(e)}")
 
@@ -209,3 +130,33 @@ async def delete_file(
         return Message(message="File deleted successfully.")
     except Exception as e:
         handle_telegram_error(e, db, current_user)
+
+
+from fastapi import Request
+
+@router.post("/api/upload/stream")
+async def upload_volume_stream(
+    request: Request,
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not current_user.telegram_session or not current_user.channel_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
+        
+    content_length = request.headers.get("Content-Length")
+    if not content_length:
+        raise HTTPException(400, "Content-Length header required")
+        
+    try:
+        from app.services.telegram_service import upload_stream_to_telegram
+        message_id = await upload_stream_to_telegram(
+            session_string=current_user.telegram_session,
+            channel_id=current_user.channel_id,
+            filename=filename,
+            file_size=int(content_length),
+            stream=request.stream()
+        )
+        return {"status": "success", "message_id": message_id}
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
