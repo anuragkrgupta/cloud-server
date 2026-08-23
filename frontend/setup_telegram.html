@@ -55,6 +55,17 @@
             </p>
         </div>
 
+        <!-- 2FA Password Input -->
+        <div id="2fa-wrapper" class="hidden flex flex-col items-center justify-center mb-6">
+            <p class="text-sm text-slate-300 mb-4 text-center">
+                You have Two-Step Verification enabled. Please enter your password to continue.
+            </p>
+            <input type="password" id="2fa-password" placeholder="Password" class="w-full bg-slate-800/50 border border-slate-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors mb-4">
+            <button id="btn-submit-2fa" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-3 rounded-lg shadow-lg hover:shadow-indigo-500/25 transition-all">
+                Submit
+            </button>
+        </div>
+
         <div class="mt-6 text-center">
             <button id="btn-logout" class="text-sm text-slate-400 hover:text-white transition-colors">Sign Out</button>
         </div>

@@ -18,11 +18,17 @@
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
+        /* Speed bar animated fill */
+        @keyframes speed-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .speed-pulse { animation: speed-pulse 1.2s ease-in-out infinite; }
     </style>
 </head>
 <body class="min-h-screen p-4 flex justify-center items-center">
 
-    <div id="main-container" class="glass-panel p-8 rounded-2xl w-full max-w-2xl shadow-2xl relative overflow-hidden hidden">
+    <div id="main-container" class="glass-panel p-8 rounded-2xl w-full max-w-2xl shadow-2xl relative overflow-hidden" style="display:none">
         <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
 
         <div class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
@@ -59,7 +65,7 @@
                         <span class="text-slate-400">Status</span>
                         <span id="tg-status" class="px-2 py-1 rounded text-xs font-medium">Checking...</span>
                     </div>
-                    <div id="tg-channel-row" class="flex justify-between text-sm mt-3 hidden">
+                    <div id="tg-channel-row" class="flex justify-between text-sm mt-3" style="display:none">
                         <span class="text-slate-400">Storage Channel</span>
                         <span class="text-slate-100 font-medium font-mono text-xs" id="tg-channel-id"></span>
                     </div>
@@ -71,7 +77,7 @@
         <div class="mt-8 bg-slate-900/50 p-5 rounded-xl border border-slate-700/50">
             <h3 class="text-lg font-semibold text-slate-200 mb-4">Upload a File</h3>
             <form id="upload-form" class="space-y-4">
-                <div id="upload-msg" class="hidden p-3 text-sm rounded-lg"></div>
+                <div id="upload-msg" style="display:none" class="p-3 text-sm rounded-lg"></div>
                 
                 <div class="flex items-center justify-center w-full">
                     <label for="file-upload" class="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-600 border-dashed rounded-lg cursor-pointer hover:bg-slate-800 hover:border-indigo-500 transition-all">
@@ -89,6 +95,41 @@
                 <button type="submit" id="btn-upload" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2 rounded-lg transition-all shadow-lg hover:shadow-indigo-500/25">
                     Upload to Cloud
                 </button>
+
+                <div class="mt-3 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg flex items-start text-xs text-indigo-300">
+                    <svg class="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <div>
+                        <strong class="font-medium text-indigo-200">Notice on Upload Speeds:</strong><br>
+                        Telegram enforces strict speed limits file uploads (typically ~2-3 MB/s, sometimes lower without Telegram Premium). The system uploads your file sequentially as fast as Telegram allows to ensure perfect stability.
+                    </div>
+                </div>
+
+                <!-- Upload speed panel (shown during upload) -->
+                <div id="upload-speed-panel" style="display:none" class="mt-3 bg-slate-800/60 border border-slate-700 rounded-xl p-4 space-y-3">
+                    <div class="flex justify-between items-center text-xs text-slate-400">
+                        <span class="font-semibold text-slate-200 uppercase tracking-wide">Upload Progress</span>
+                        <span id="upload-eta" class="text-slate-400">—</span>
+                    </div>
+                    <!-- Progress bar -->
+                    <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
+                        <div id="upload-progress-bar" class="h-2 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 speed-pulse" style="width:0%"></div>
+                    </div>
+                    <!-- Stats row -->
+                    <div class="grid grid-cols-3 gap-2 text-center">
+                        <div class="bg-slate-900/60 rounded-lg p-2">
+                            <div class="text-xs text-slate-500 mb-1">Speed</div>
+                            <div id="upload-speed" class="text-sm font-bold text-indigo-400">— MB/s</div>
+                        </div>
+                        <div class="bg-slate-900/60 rounded-lg p-2">
+                            <div class="text-xs text-slate-500 mb-1">Uploaded</div>
+                            <div id="upload-transferred" class="text-sm font-bold text-slate-200">0 B</div>
+                        </div>
+                        <div class="bg-slate-900/60 rounded-lg p-2">
+                            <div class="text-xs text-slate-500 mb-1">Progress</div>
+                            <div id="upload-percent" class="text-sm font-bold text-purple-400">0%</div>
+                        </div>
+                    </div>
+                </div>
             </form>
         </div>
 
@@ -100,8 +141,17 @@
             </ul>
         </div>
 
+    <div id="loading-screen" class="absolute inset-0 flex items-center justify-center bg-slate-900 z-50">
+        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
     </div>
-
-    <script src="/js/dashboard.js"></script>
+    
+    <script>
+        // Remove loading screen when JS loads and checks auth
+        window.hideLoadingScreen = function() {
+            var loader = document.getElementById('loading-screen');
+            if (loader) loader.style.display = 'none';
+        };
+    </script>
+    <script src="/js/dashboard.js?v=20240823_stream"></script>
 </body>
 </html>
