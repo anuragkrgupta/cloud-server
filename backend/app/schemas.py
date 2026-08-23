@@ -48,7 +48,7 @@ class UserOut(BaseModel):
     name: str
     email: str
     is_telegram_connected: bool
-    channel_id: int | None = None
+    channel_id: str | None = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -69,6 +69,11 @@ class TelegramQRStartResponse(BaseModel):
 class TelegramQRStatusResponse(BaseModel):
     status: str
     message: str | None = None
+
+
+class Telegram2FARequest(BaseModel):
+    token: str
+    password: str
 
 
 class FileOut(BaseModel):

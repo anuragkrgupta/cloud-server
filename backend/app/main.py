@@ -22,9 +22,18 @@ app.include_router(files.router, tags=["files"])
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
 
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    from app.services.telegram_service import disconnect_all_clients
+    await disconnect_all_clients()
+
 # Mount the frontend directory so HTML/JS/CSS are served statically
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 frontend_dir = os.path.join(BASE_DIR, "frontend")
 
 if os.path.exists(frontend_dir):
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+
+# Trigger reload
+
+# Trigger reload 2

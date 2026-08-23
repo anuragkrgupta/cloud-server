@@ -23,15 +23,16 @@ def _require(name: str, default: str | None = None) -> str:
 class Settings:
     # MySQL
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
-    DB_PORT: str = os.getenv("DB_PORT", "3306")
+    DB_PORT: str = os.getenv("DB_PORT", "3307")
     DB_USER: str = os.getenv("DB_USER", "root")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_NAME: str = os.getenv("DB_NAME", "cloud_db")
 
     @property
     def DATABASE_URL(self) -> str:
+        pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
         return (
-            f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}"
+            f"mysql+mysqlconnector://{self.DB_USER}{pwd}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
 
