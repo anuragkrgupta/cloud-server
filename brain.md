@@ -112,6 +112,7 @@ Note: `is_telegram_connected` is a Python @property — not a DB column. Returns
 | file_id | INT FK files.id | CASCADE delete |
 | part_index | INT | 0-based; ordering of volumes |
 | telegram_message_id | INT | Telegram message ID in user's channel |
+| channel_id | VARCHAR(50) | Telegram channel ID where this specific part was uploaded |
 
 A single-volume file (<1.9 GB) has exactly ONE FilePartRecord. Multi-volume files have one record per volume.
 
@@ -140,10 +141,11 @@ A single-volume file (<1.9 GB) has exactly ONE FilePartRecord. Multi-volume file
 - Backward compat: strings NOT starting with "gAAAAA" treated as legacy unencrypted sessions (returned as-is from decrypt)
 
 ### Telegram Session Expiry Handling
-handle_telegram_error() in files.py catches these Telethon error names:
-  AuthKeyUnregisteredError, SessionExpiredError, SessionRevokedError,
-  UserDeactivatedError, UserDeactivatedBanError, UnauthorizedError
-On match: nulls telegram_session + channel_id in DB, returns HTTP 401.
+`handle_telegram_error()` in `files.py` catches these Telethon error names:
+  `AuthKeyUnregisteredError`, `SessionExpiredError`, `SessionRevokedError`,
+  `UserDeactivatedError`, `UserDeactivatedBanError`, `UnauthorizedError`
+On match: nulls `telegram_session` in DB, returns HTTP 400.
+**Crucially, it does NOT null `channel_id` or `telegram_user_id`**, ensuring that previously uploaded files are not orphaned if the user simply needs to log back in.
 
 ---
 
@@ -227,15 +229,20 @@ get_dialogs(limit=50) is called first to populate the session cache, then retrie
 POST /api/telegram/qr-start
   -> new TelegramClient + connect() + qr_login()
   -> asyncio background task: waits for user to scan
-  -> success: create private channel, store in pending_logins[token_id]
+  -> success: if account mismatch, set status="account_mismatch"
+              else reuse existing channel or create private channel, store in pending_logins[token_id]
 
 GET /api/telegram/qr-status?token=<uuid>
   -> read pending_logins[token]
   -> on success: encrypt session, write to DB, return 200
+  -> on mismatch: return account_mismatch to prompt user
 
 POST /api/telegram/2fa  (triggered if status == "2fa_required")
   -> client.sign_in(password=...) on still-open client
-  -> same channel creation + DB save flow
+  -> same account mismatch / channel creation + DB save flow
+
+POST /api/telegram/override-mismatch
+  -> force creation of a new channel despite account mismatch, clearing the old channel link
 ```
 
 IMPORTANT: pending_logins is module-level dict. Does NOT survive server restart.
@@ -301,11 +308,6 @@ Users mid-QR-scan must start over.
 FileRecord has a telegram_file_id column that is never written to.
 The current design uses telegram_message_id in FilePartRecord instead.
 
-### is_telegram_connected assignment is a no-op
-handle_telegram_error() in files.py sets current_user.is_telegram_connected = False.
-is_telegram_connected is a @property with no setter, so this silently does nothing.
-The real fix (telegram_session = None) is already done on the previous line.
-
 ---
 
 ## 11. Areas for Future Improvement
@@ -338,7 +340,3 @@ Add a refresh endpoint or sliding expiry window.
 
 ### Remove unused telegram_file_id column
 Either populate it or remove it from the schema to avoid confusion.
-
-### Fix is_telegram_connected property setter
-Add a proper @is_telegram_connected.setter or remove the assignment in handle_telegram_error()
-since setting telegram_session = None already achieves the same effect.

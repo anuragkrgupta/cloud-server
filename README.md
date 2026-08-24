@@ -133,6 +133,7 @@ Open your browser and navigate to:
 | `POST` | `/api/telegram/qr-start` | Start QR login flow |
 | `GET` | `/api/telegram/qr-status` | Poll QR login status |
 | `POST` | `/api/telegram/2fa` | Submit 2FA password |
+| `POST` | `/api/telegram/override-mismatch` | Override account mismatch and create a new channel |
 | `POST` | `/api/telegram/disconnect` | Clear Telegram session |
 | `POST` | `/api/upload/stream` | Stream raw file bytes |
 | `POST` | `/api/upload/complete` | Save file record to DB |
