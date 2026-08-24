@@ -34,8 +34,8 @@
 
     <div class="glass-panel p-8 rounded-2xl w-full max-w-md shadow-2xl relative overflow-hidden">
         <!-- Decoration -->
-        <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
-        <div class="absolute -bottom-10 -left-10 w-40 h-40 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20"></div>
+        <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 pointer-events-none"></div>
+        <div class="absolute -bottom-10 -left-10 w-40 h-40 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 pointer-events-none"></div>
 
         <div class="relative z-10 text-center mb-6">
             <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">Connect Telegram</h1>
@@ -56,13 +56,30 @@
         </div>
 
         <!-- 2FA Password Input -->
-        <div id="2fa-wrapper" class="hidden flex flex-col items-center justify-center mb-6">
+        <div id="2fa-wrapper" class="hidden flex-col items-center justify-center mb-6">
             <p class="text-sm text-slate-300 mb-4 text-center">
                 You have Two-Step Verification enabled. Please enter your password to continue.
             </p>
             <input type="password" id="2fa-password" placeholder="Password" class="w-full bg-slate-800/50 border border-slate-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors mb-4">
             <button id="btn-submit-2fa" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-3 rounded-lg shadow-lg hover:shadow-indigo-500/25 transition-all">
                 Submit
+            </button>
+        </div>
+
+        <!-- Account Mismatch Display -->
+        <div id="mismatch-wrapper" class="hidden flex-col items-center justify-center mb-6 text-center">
+            <div class="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/50 text-yellow-200 text-sm rounded-lg">
+                <strong>Account Mismatch!</strong><br>
+                You linked a different Telegram account than before. Files uploaded under the previous account won't be accessible here until you reconnect it.
+            </div>
+            <p class="text-sm text-slate-300 mb-4">
+                Continue with this new account and create a new storage channel?
+            </p>
+            <button id="btn-override-mismatch" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 rounded-lg shadow-lg mb-3 transition-all">
+                Yes, continue anyway
+            </button>
+            <button id="btn-cancel-mismatch" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-semibold py-3 rounded-lg shadow-lg transition-all">
+                Cancel & Try Again
             </button>
         </div>
 
