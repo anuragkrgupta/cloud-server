@@ -22,6 +22,10 @@ const faWrapper = document.getElementById('2fa-wrapper');
 const btnSubmit2fa = document.getElementById('btn-submit-2fa');
 const faPassword = document.getElementById('2fa-password');
 
+const mismatchWrapper = document.getElementById('mismatch-wrapper');
+const btnOverrideMismatch = document.getElementById('btn-override-mismatch');
+const btnCancelMismatch = document.getElementById('btn-cancel-mismatch');
+
 let pollInterval = null;
 let currentToken = null;
 
@@ -95,6 +99,14 @@ async function checkStatus(token) {
             qrWrapper.classList.remove('flex');
             faWrapper.classList.remove('hidden');
             faWrapper.classList.add('flex');
+        } else if (data.status === 'account_mismatch') {
+            clearInterval(pollInterval);
+            qrWrapper.classList.add('hidden');
+            qrWrapper.classList.remove('flex');
+            faWrapper.classList.add('hidden');
+            faWrapper.classList.remove('flex');
+            mismatchWrapper.classList.remove('hidden');
+            mismatchWrapper.classList.add('flex');
         } else if (data.status === 'failed' || data.status === 'not_found') {
             clearInterval(pollInterval);
             showError('QR Login failed or expired. Please refresh the page.');
@@ -126,7 +138,7 @@ btnSubmit2fa.addEventListener('click', async () => {
         
         const data = await res.json();
         
-        if (!res.ok) {
+        if (!res.ok && data.status !== 'account_mismatch') {
             throw new Error(data.detail || data.message || 'Failed to verify password');
         }
         
@@ -135,6 +147,10 @@ btnSubmit2fa.addEventListener('click', async () => {
             setTimeout(() => {
                 window.location.href = '/dashboard.html';
             }, 1500);
+        } else if (data.status === 'account_mismatch') {
+            loadingMsg.classList.add('hidden');
+            mismatchWrapper.classList.remove('hidden');
+            mismatchWrapper.classList.add('flex');
         } else {
             throw new Error(data.message || 'Verification failed');
         }
@@ -147,6 +163,38 @@ btnSubmit2fa.addEventListener('click', async () => {
             faWrapper.classList.add('flex');
         }, 3000);
     }
+});
+
+btnOverrideMismatch.addEventListener('click', async () => {
+    mismatchWrapper.classList.add('hidden');
+    mismatchWrapper.classList.remove('flex');
+    loadingMsg.textContent = "Creating new storage channel...";
+    loadingMsg.classList.remove('hidden');
+    
+    try {
+        const res = await fetch('/api/telegram/override-mismatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: currentToken })
+        });
+        
+        const data = await res.json();
+        
+        if (data.status === 'success') {
+            showSuccess('Mismatched account accepted! Redirecting...');
+            setTimeout(() => {
+                window.location.href = '/dashboard.html';
+            }, 1500);
+        } else {
+            throw new Error(data.message || 'Failed to override mismatch');
+        }
+    } catch (err) {
+        showError(err.message);
+    }
+});
+
+btnCancelMismatch.addEventListener('click', () => {
+    window.location.reload();
 });
 
 btnLogout.addEventListener('click', async () => {

@@ -144,6 +144,12 @@ function loadFiles() {
               +     '<div class="text-xs text-slate-500">'+formatBytes(f.file_size)+'</div>'
               +   '</div>'
               +   '<div class="flex gap-2 shrink-0">'
+              +     '<button onclick="shareFile('+f.id+')"'
+              +       ' class="p-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded-lg border border-emerald-500/30" title="Share">'
+              +       '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+              +         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />'
+              +       '</svg>'
+              +     '</button>'
               +     '<button id="dl-btn-'+f.id+'" onclick="dlFile('+f.id+')"'
               +       ' class="p-2 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded-lg border border-indigo-500/30" title="Download">'
               +       '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
@@ -173,6 +179,25 @@ function loadFiles() {
     }).catch(function(e){ console.error('loadFiles error:', e); });
 }
 
+window.shareFile = function(id) {
+    fetch('/api/files/'+id+'/share', { method: 'POST' })
+    .then(function(res){
+        if (!res.ok) throw new Error('Share failed');
+        return res.json();
+    })
+    .then(function(data){
+        var url = window.location.origin + data.url;
+        navigator.clipboard.writeText(url).then(function(){
+            alert('Share link copied to clipboard:\n' + url);
+        }).catch(function(){
+            prompt('Copy this link:', url);
+        });
+    })
+    .catch(function(e){
+        alert('Failed to share file.');
+    });
+};
+
 // ---- Download with live speed -----------------------------------------
 
 window.dlFile = function(id) {
@@ -194,7 +219,16 @@ window.dlFile = function(id) {
 
     fetch('/api/download/'+id)
     .then(function(res){
-        if (!res.ok) throw new Error('HTTP '+res.status);
+        if (!res.ok) {
+            return res.text().then(function(txt) {
+                var msg = 'HTTP ' + res.status;
+                try {
+                    var d = JSON.parse(txt);
+                    msg = d.detail || msg;
+                } catch(e) {}
+                throw new Error(msg);
+            });
+        }
         var total  = parseInt(res.headers.get('Content-Length')||'0', 10);
         var reader = res.body.getReader();
 
@@ -243,6 +277,10 @@ window.dlFile = function(id) {
     .catch(function(e){
         spdEl.textContent = '✗ Error';
         console.error('Download error:', e);
+        if (e.message && e.message.toLowerCase().includes('session expired')) {
+            location.href = '/setup_telegram.html';
+            return;
+        }
         if (btn) btn.disabled = false;
     });
 };
@@ -356,6 +394,10 @@ el('upload-form').addEventListener('submit', function(e){
 
     doVol(0)
     .catch(function(err){
+        if (err.message && err.message.toLowerCase().includes('session expired')) {
+            location.href = '/setup_telegram.html';
+            return;
+        }
         showMsg(err.message || 'Upload failed', true);
         el('upload-speed-panel').style.display = 'none';
     })
@@ -364,3 +406,4 @@ el('upload-form').addEventListener('submit', function(e){
         btn.textContent = 'Upload to Cloud';
     });
 });
+

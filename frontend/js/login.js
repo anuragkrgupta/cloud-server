@@ -7,6 +7,14 @@ const submitBtn = document.getElementById('submit-btn');
 fetch('/api/me').then(async res => {
   if (res.ok) {
     const user = await res.json();
+    
+    const redirectUrl = localStorage.getItem('redirect_after_login');
+    if (redirectUrl) {
+        localStorage.removeItem('redirect_after_login');
+        window.location.href = redirectUrl;
+        return;
+    }
+    
     if (user.is_telegram_connected) {
         window.location.href = '/dashboard.html';
     } else {
@@ -48,6 +56,14 @@ form.addEventListener('submit', async (e) => {
       const meRes = await fetch('/api/me');
       if (meRes.ok) {
          const user = await meRes.json();
+         
+         const redirectUrl = localStorage.getItem('redirect_after_login');
+         if (redirectUrl) {
+             localStorage.removeItem('redirect_after_login');
+             window.location.href = redirectUrl;
+             return;
+         }
+         
          if (user.is_telegram_connected) {
              window.location.href = '/dashboard.html';
          } else {
