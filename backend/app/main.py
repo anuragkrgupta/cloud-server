@@ -10,13 +10,14 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.database import Base, engine
-from app.routes import auth_routes, telegram, files
+from app.routes import auth_routes, telegram, files, share
 
 app = FastAPI(title="Telegram Cloud Storage MVP")
 
 app.include_router(auth_routes.router, tags=["auth"])
 app.include_router(telegram.router, tags=["telegram"])
 app.include_router(files.router, tags=["files"])
+app.include_router(share.router, tags=["share"])
 
 @app.on_event("startup")
 def on_startup() -> None:

@@ -20,6 +20,8 @@ class User(Base):
     channel_id = Column(String(50), nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
+    files = relationship("FileRecord", back_populates="user", cascade="all, delete-orphan")
+
     def __repr__(self) -> str:
         return f"<User id={self.id} name={self.name!r}>"
 
@@ -38,6 +40,11 @@ class FileRecord(Base):
     uploaded_at = Column(DateTime, server_default=func.now(), nullable=False)
     mime_type = Column(String(100), nullable=True) # Kept for internal logic
     
+    # Sharing fields
+    is_shared = Column(Boolean, default=False)
+    share_token = Column(String(255), unique=True, index=True, nullable=True)
+    
+    user = relationship("User", back_populates="files")
     parts = relationship("FilePartRecord", back_populates="file", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
@@ -50,6 +57,7 @@ class FilePartRecord(Base):
     file_id = Column(Integer, ForeignKey("files.id"), index=True, nullable=False)
     part_index = Column(Integer, nullable=False)
     telegram_message_id = Column(Integer, nullable=False)
+    channel_id = Column(String(50), nullable=True)
     
     file = relationship("FileRecord", back_populates="parts")
 

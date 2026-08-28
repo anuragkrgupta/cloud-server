@@ -44,6 +44,7 @@ class Settings:
     # Telegram
     TG_API_ID: int = int(os.getenv("TG_API_ID", "0"))
     TG_API_HASH: str = os.getenv("TG_API_HASH", "")
+    WORKERS_PER_TRANSFER: int = int(os.getenv("WORKERS_PER_TRANSFER", "1"))
 
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 

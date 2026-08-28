@@ -74,6 +74,10 @@ class TelegramQRStatusResponse(BaseModel):
 class Telegram2FARequest(BaseModel):
     token: str
     password: str
+    force_new_channel: bool = False
+
+class TelegramMismatchOverrideRequest(BaseModel):
+    token: str
 
 
 class FileOut(BaseModel):
@@ -81,5 +85,7 @@ class FileOut(BaseModel):
     original_name: str
     file_size: int
     uploaded_at: datetime
+    is_shared: bool = False
+    share_token: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
