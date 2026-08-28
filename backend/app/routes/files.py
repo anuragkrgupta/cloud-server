@@ -20,6 +20,15 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+from telethon.errors import SessionExpiredError, AuthKeyUnregisteredError
+
+def handle_telegram_error(e: Exception, db: Session, current_user: User):
+    if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError)):
+        current_user.telegram_session = None
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram session expired or revoked. Please reconnect your account.")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
 class CompleteUploadParams(BaseModel):
     filename: str
     file_size: int
@@ -47,7 +56,8 @@ def complete_upload(
             part_record = FilePartRecord(
                 file_id=file_record.id,
                 part_index=idx,
-                telegram_message_id=msg_id
+                telegram_message_id=msg_id,
+                channel_id=current_user.channel_id
             )
             db.add(part_record)
             
@@ -84,14 +94,19 @@ async def download_file(
         parts = sorted(file_record.parts, key=lambda p: p.part_index)
         message_ids = [part.telegram_message_id for part in parts]
         
-        async def combined_stream(msg_ids):
-            stream = download_multiple_messages_stream(
+        try:
+            channel_id = parts[0].channel_id if (len(parts) > 0 and parts[0].channel_id) else current_user.channel_id
+            
+            stream = await download_multiple_messages_stream(
                 session_string=current_user.telegram_session,
-                channel_id=current_user.channel_id,
-                message_ids=msg_ids
+                channel_id=channel_id,
+                message_ids=message_ids
             )
-            async for chunk in stream:
-                yield chunk
+        except HTTPException:
+            raise
+        except Exception as e:
+            handle_telegram_error(e, db, current_user)
+            raise HTTPException(status_code=500, detail=str(e))
 
         safe_filename = urllib.parse.quote(file_record.original_name)
         headers = {
@@ -99,7 +114,9 @@ async def download_file(
             "Content-Length": str(file_record.file_size),
         }
         
-        return StreamingResponse(combined_stream(message_ids), media_type=file_record.mime_type, headers=headers)
+        return StreamingResponse(stream, media_type=file_record.mime_type, headers=headers)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stream file: {str(e)}")
 
@@ -119,9 +136,10 @@ async def delete_file(
         
     try:
         for part in file_record.parts:
+            channel_id = part.channel_id or current_user.channel_id
             await delete_file_from_telegram(
                 session_string=current_user.telegram_session,
-                channel_id=current_user.channel_id,
+                channel_id=channel_id,
                 message_id=part.telegram_message_id
             )
         
