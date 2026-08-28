@@ -6,6 +6,7 @@ from telethon.sessions import StringSession
 from telethon.tl.functions.channels import CreateChannelRequest
 from telethon.errors import SessionPasswordNeededError
 from app.config import settings
+from app.services.parallel_transfer import upload_stream_parallel, download_message_parallel
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ async def _get_upload_client(file_id: int, session_string: str) -> TelegramClien
         }
     return _upload_clients[file_id]["client"]
 
-async def start_qr_login() -> tuple[str, str]:
+async def start_qr_login(user_channel_id: str = None, user_tg_user_id: str = None) -> tuple[str, str]:
     """
     Initiates a Telegram connection and starts QR login.
     Returns (token_id, qr_url)
@@ -74,26 +75,39 @@ async def start_qr_login() -> tuple[str, str]:
     
     qr_login_obj = await client.qr_login()
     
-    async def wait_for_login(tid, cli, qr):
+    async def wait_for_login(tid, cli, qr, u_channel_id, u_tg_user_id):
         try:
             # This blocks until the user scans and approves the QR code, or it times out
             user = await qr.wait()
-            
-            # Create a private channel for Cloud Storage
-            channel_id = ""
-            try:
-                result = await cli(CreateChannelRequest(
-                    title="Personal Cloud Storage",
-                    about="Storage channel managed by Cloud Server Web App",
-                    megagroup=False
-                ))
-                channel = result.chats[0]
-                channel_id = str(channel.id)
-            except Exception as e:
-                logger.error(f"Failed to create storage channel: {e}")
-                
-            session_string = cli.session.save()
             tg_user_id = str(user.id)
+            
+            if u_channel_id and u_tg_user_id and tg_user_id != u_tg_user_id:
+                pending_logins[tid]["status"] = "account_mismatch"
+                pending_logins[tid]["session_string"] = cli.session.save()
+                pending_logins[tid]["tg_user_id"] = tg_user_id
+                await cli.disconnect()
+                return
+
+            channel_id = u_channel_id
+            if not channel_id:
+                # Create a private channel for Cloud Storage
+                try:
+                    result = await cli(CreateChannelRequest(
+                        title=f"CloudStorage_{tg_user_id}",
+                        about="Storage channel managed by Cloud Server Web App",
+                        megagroup=False
+                    ))
+                    channel = result.chats[0]
+                    channel_id = str(channel.id)
+                except Exception as e:
+                    logger.error(f"Failed to create storage channel: {e}")
+            else:
+                try:
+                    await get_resolved_entity(cli, channel_id)
+                except Exception as e:
+                    logger.warning(f"Failed to resolve existing channel during login: {e}")
+                    
+            session_string = cli.session.save()
             
             pending_logins[tid]["status"] = "success"
             pending_logins[tid]["session_string"] = session_string
@@ -106,6 +120,8 @@ async def start_qr_login() -> tuple[str, str]:
             logger.info(f"2FA required for {tid}")
             pending_logins[tid]["status"] = "2fa_required"
             pending_logins[tid]["client"] = cli
+            pending_logins[tid]["user_channel_id"] = u_channel_id
+            pending_logins[tid]["user_tg_user_id"] = u_tg_user_id
             return # Keep connection open for password submission
         except Exception as e:
             logger.error(f"QR Login failed for {tid}: {e}")
@@ -113,7 +129,7 @@ async def start_qr_login() -> tuple[str, str]:
             await cli.disconnect()
 
     # Start listening in background
-    task = asyncio.create_task(wait_for_login(token_id, client, qr_login_obj))
+    task = asyncio.create_task(wait_for_login(token_id, client, qr_login_obj, user_channel_id, user_tg_user_id))
     
     pending_logins[token_id] = {
         "status": "pending",
@@ -122,7 +138,7 @@ async def start_qr_login() -> tuple[str, str]:
     
     return token_id, qr_login_obj.url
 
-async def submit_qr_password(token_id: str, password: str) -> dict:
+async def submit_qr_password(token_id: str, password: str, force_new_channel: bool = False) -> dict:
     if token_id not in pending_logins:
         return {"status": "not_found"}
         
@@ -131,24 +147,40 @@ async def submit_qr_password(token_id: str, password: str) -> dict:
         return {"status": "invalid_state"}
         
     client = info["client"]
+    u_channel_id = info.get("user_channel_id")
+    u_tg_user_id = info.get("user_tg_user_id")
+    
     try:
         user = await client.sign_in(password=password)
-        
-        # Create a private channel for Cloud Storage
-        channel_id = ""
-        try:
-            result = await client(CreateChannelRequest(
-                title="Personal Cloud Storage",
-                about="Storage channel managed by Cloud Server Web App",
-                megagroup=False
-            ))
-            channel = result.chats[0]
-            channel_id = str(channel.id)
-        except Exception as e:
-            logger.error(f"Failed to create storage channel: {e}")
-            
-        session_string = client.session.save()
         tg_user_id = str(user.id)
+        
+        if u_channel_id and u_tg_user_id and tg_user_id != u_tg_user_id and not force_new_channel:
+            pending_logins[token_id]["status"] = "account_mismatch"
+            pending_logins[token_id]["session_string"] = client.session.save()
+            pending_logins[token_id]["tg_user_id"] = tg_user_id
+            await client.disconnect()
+            return {"status": "account_mismatch"}
+            
+        channel_id = u_channel_id
+        if not channel_id or force_new_channel:
+            # Create a private channel for Cloud Storage
+            try:
+                result = await client(CreateChannelRequest(
+                    title=f"CloudStorage_{tg_user_id}",
+                    about="Storage channel managed by Cloud Server Web App",
+                    megagroup=False
+                ))
+                channel = result.chats[0]
+                channel_id = str(channel.id)
+            except Exception as e:
+                logger.error(f"Failed to create storage channel: {e}")
+        else:
+            try:
+                await get_resolved_entity(client, channel_id)
+            except Exception as e:
+                logger.warning(f"Failed to resolve existing channel during login: {e}")
+                
+        session_string = client.session.save()
         
         pending_logins[token_id]["status"] = "success"
         pending_logins[token_id]["session_string"] = session_string
@@ -183,11 +215,52 @@ def check_qr_login_status(token_id: str) -> dict:
         del pending_logins[token_id]
         return result
         
+    if info["status"] == "account_mismatch":
+        result = {
+            "status": "account_mismatch",
+            "session_string": info["session_string"],
+            "tg_user_id": info["tg_user_id"]
+        }
+        # DO NOT delete pending_logins yet so they can confirm/override
+        return result
+        
     if info["status"] == "failed":
         del pending_logins[token_id]
         return {"status": "failed"}
         
-    return {"status": "pending"}
+    return {"status": info["status"]}
+
+async def override_account_mismatch(token_id: str) -> dict:
+    if token_id not in pending_logins:
+        return {"status": "not_found"}
+    info = pending_logins[token_id]
+    if info["status"] != "account_mismatch":
+        return {"status": "invalid_state"}
+        
+    session_string = info["session_string"]
+    tg_user_id = info["tg_user_id"]
+    
+    client = await get_client_for_session(session_string)
+    channel_id = ""
+    try:
+        result = await client(CreateChannelRequest(
+            title=f"CloudStorage_{tg_user_id}",
+            about="Storage channel managed by Cloud Server Web App",
+            megagroup=False
+        ))
+        channel = result.chats[0]
+        channel_id = str(channel.id)
+    except Exception as e:
+        logger.error(f"Failed to create storage channel on override: {e}")
+        
+    session_string = client.session.save()
+    
+    pending_logins[token_id]["status"] = "success"
+    pending_logins[token_id]["session_string"] = session_string
+    pending_logins[token_id]["channel_id"] = channel_id
+    
+    await client.disconnect()
+    return {"status": "success"}
 
 async def get_resolved_entity(client: TelegramClient, channel_id: str):
     """
@@ -255,7 +328,12 @@ async def download_file_stream(session_string: str, channel_id: str, message_id:
         if not message or not message.media:
             raise Exception("Media not found in the specified message.")
             
-        async for chunk in client.iter_download(message.media):
+        async for chunk in download_message_parallel(
+            client, 
+            message.media, 
+            message.document.size, 
+            workers=settings.WORKERS_PER_TRANSFER
+        ):
             yield chunk
             
     
@@ -267,25 +345,44 @@ async def download_multiple_messages_stream(session_string: str, channel_id: str
     """
     Returns an async generator that streams the file directly from multiple Telegram messages.
     Maintains a single connection for all parts.
+    Eagerly validates the session before returning the stream.
     """
     from app.auth import decrypt_telegram_session
     client = await get_client_for_session(session_string)
     
-    try:
-        entity = await get_resolved_entity(client, channel_id)
-        
-        for msg_id in message_ids:
-            message = await client.get_messages(entity, ids=msg_id)
-            if not message or not message.media:
-                raise Exception(f"Media not found in the specified message (ID: {msg_id}).")
-                
-            async for chunk in client.iter_download(message.media):
-                yield chunk
-                
+    # Eager validation: this will raise AuthKeyUnregisteredError immediately if session is invalid
+    entity = await get_resolved_entity(client, channel_id)
     
-    except Exception as e:
-        logger.error(f"Download error: {e}")
-        raise e
+    if not message_ids:
+        raise ValueError("No message IDs provided")
+        
+    # Eagerly fetch the first message to force a network request and catch session errors before streaming
+    first_message = await client.get_messages(entity, ids=message_ids[0])
+    if not first_message or not first_message.media:
+        raise Exception(f"Media not found in the specified message (ID: {message_ids[0]}).")
+
+    async def _stream():
+        try:
+            for i, msg_id in enumerate(message_ids):
+                if i == 0:
+                    message = first_message
+                else:
+                    message = await client.get_messages(entity, ids=msg_id)
+                    if not message or not message.media:
+                        raise Exception(f"Media not found in the specified message (ID: {msg_id}).")
+                    
+                async for chunk in download_message_parallel(
+                    client, 
+                    message.media, 
+                    message.document.size, 
+                    workers=settings.WORKERS_PER_TRANSFER
+                ):
+                    yield chunk
+        except Exception as e:
+            logger.error(f"Download stream error: {e}")
+            raise e
+
+    return _stream()
 
 async def delete_file_from_telegram(session_string: str, channel_id: str, message_id: int):
     """
@@ -361,38 +458,16 @@ async def upload_stream_to_telegram(
     
     client = await get_client_for_session(session_string)
     
-    buffer = b""
-    part_index = 0
-    
     try:
-        async for chunk in stream:
-            buffer += chunk
-            while len(buffer) >= PART_SIZE:
-                part_data = buffer[:PART_SIZE]
-                buffer = buffer[PART_SIZE:]
-                
-                if is_big:
-                    req = SaveBigFilePartRequest(file_id=file_id, file_part=part_index, file_total_parts=total_parts, bytes=part_data)
-                else:
-                    req = SaveFilePartRequest(file_id=file_id, file_part=part_index, bytes=part_data)
-                
-                await client(req)
-                part_index += 1
-        
-        if buffer:
-            if is_big:
-                req = SaveBigFilePartRequest(file_id=file_id, file_part=part_index, file_total_parts=total_parts, bytes=buffer)
-            else:
-                req = SaveFilePartRequest(file_id=file_id, file_part=part_index, bytes=buffer)
-            
-            await client(req)
-            part_index += 1
+        input_file = await upload_stream_parallel(
+            client, 
+            stream, 
+            file_size, 
+            workers=settings.WORKERS_PER_TRANSFER
+        )
+        input_file.name = filename
 
         entity = await get_resolved_entity(client, channel_id)
-        if is_big:
-            input_file = InputFileBig(id=file_id, parts=total_parts, name=filename)
-        else:
-            input_file = InputFile(id=file_id, parts=total_parts, name=filename, md5_checksum="")
 
         message = await client.send_file(entity, file=input_file, force_document=True)
         return message.id
