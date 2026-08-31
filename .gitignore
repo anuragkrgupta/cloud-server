@@ -1,27 +1,46 @@
-# Python
+# Python & Virtual Environments
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
+*.so
 venv/
 env/
-.env
+.venv/
+backend/venv/
 
-# SQLite
+# Environment Variables & Secrets
+.env
+.env.*
+*.env
+backend/.env
+secret*.txt
+
+# SQLite & Databases
 *.db
 *.sqlite3
+*.db-journal
 
-# Project Specific
+# Project Specific (Telethon / Telegram)
 backend/sessions/
 backend/downloads/
 *.session
-
-# Frontend / JS
-node_modules/
-dist/
-build/
-.npm
-.yarn
+*.session-journal
 
 # OS generated files
 .DS_Store
+.DS_Store?
+._*
+ehthumbs.db
 Thumbs.db
+
+# IDEs / Editors
+.vscode/
+.idea/
+*.swp
+
+# Frontend / Web
+node_modules/
+dist/
+
+# Logs
+*.log
