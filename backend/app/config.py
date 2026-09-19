@@ -53,6 +53,10 @@ class Settings:
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "259200"))
 
+    # Supabase SDK
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+
     # Telegram
     TG_API_ID: int = int(os.getenv("TG_API_ID", "0"))
     TG_API_HASH: str = os.getenv("TG_API_HASH", "")
