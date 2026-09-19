@@ -3,7 +3,7 @@ const errorBox = document.getElementById('error-box');
 const submitBtn = document.getElementById('submit-btn');
 
 // Check if already logged in
-fetch('/api/me').then(async res => {
+apiFetch('/api/me').then(async res => {
   if (res.ok) {
     const user = await res.json();
     if (user.is_telegram_connected) {
@@ -39,7 +39,7 @@ form.addEventListener('submit', async (e) => {
   };
 
   try {
-    const res = await fetch('/api/register', {
+    const res = await apiFetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

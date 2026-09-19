@@ -1,4 +1,4 @@
-fetch('/api/me').then(async res => {
+apiFetch('/api/me').then(async res => {
     if (res.ok) {
         const user = await res.json();
         if (user.is_telegram_connected) {

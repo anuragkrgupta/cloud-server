@@ -72,7 +72,7 @@ function upDone() {
 
 // ---- Auth check -------------------------------------------------------
 
-fetch('/api/me')
+apiFetch('/api/me')
 .then(function(r){ return r.ok ? r.json() : Promise.reject('unauth'); })
 .then(function(user) {
     if (window.hideLoadingScreen) window.hideLoadingScreen();
@@ -92,11 +92,15 @@ fetch('/api/me')
 })
 .catch(function(){ 
     if (window.hideLoadingScreen) window.hideLoadingScreen();
+    clearAuthToken();
     location.href='/login.html'; 
 });
 
 el('logout-btn').addEventListener('click', function(){
-    fetch('/api/logout',{method:'POST'}).then(function(){ location.href='/login.html'; });
+    apiFetch('/api/logout',{method:'POST'}).finally(function(){ 
+        clearAuthToken(); 
+        location.href='/login.html'; 
+    });
 });
 
 // ---- File input -------------------------------------------------------
@@ -126,7 +130,7 @@ function hideMsg(){ el('upload-msg').style.display='none'; }
 // ---- Load file list ---------------------------------------------------
 
 function loadFiles() {
-    fetch('/api/files').then(function(r){ return r.json(); }).then(function(files){
+    apiFetch('/api/files').then(function(r){ return r.json(); }).then(function(files){
         var list = el('files-list');
         if (!files.length) {
             list.innerHTML = '<li class="text-slate-500 italic">No files uploaded yet. Upload a file above!</li>';
@@ -180,7 +184,7 @@ function loadFiles() {
 }
 
 window.shareFile = function(id) {
-    fetch('/api/files/'+id+'/share', { method: 'POST' })
+    apiFetch('/api/files/'+id+'/share', { method: 'POST' })
     .then(function(res){
         if (!res.ok) throw new Error('Share failed');
         return res.json();
@@ -217,7 +221,7 @@ window.dlFile = function(id) {
     var samples  = [[performance.now(), 0]];
     var chunks   = [];
 
-    fetch('/api/download/'+id)
+    apiFetch('/api/download/'+id)
     .then(function(res){
         if (!res.ok) {
             return res.text().then(function(txt) {
@@ -289,7 +293,7 @@ window.dlFile = function(id) {
 
 window.delFile = function(id) {
     if (!confirm('Permanently delete this file from Cloud?')) return;
-    fetch('/api/files/'+id, {method:'DELETE'})
+    apiFetch('/api/files/'+id, {method:'DELETE'})
     .then(function(r){
         if (!r.ok) throw new Error('Delete failed');
         var li = el('file-'+id);
@@ -326,7 +330,7 @@ el('upload-form').addEventListener('submit', function(e){
         if (vi >= nvols) {
             // All volumes done
             showMsg('Completing upload...');
-            return fetch('/api/upload/complete', {
+            return apiFetch('/api/upload/complete', {
                 method: 'POST',
                 headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({
@@ -352,8 +356,13 @@ el('upload-form').addEventListener('submit', function(e){
 
         return new Promise(function(resolve, reject) {
             var xhr = new XMLHttpRequest();
-            var url = '/api/upload/stream?filename=' + encodeURIComponent(file.name);
+            var url = getApiUrl('/api/upload/stream?filename=' + encodeURIComponent(file.name));
             xhr.open('POST', url, true);
+            var token = getAuthToken();
+            if (token) {
+                xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+            }
+            xhr.withCredentials = true;
             
             var lastLoaded = 0;
             xhr.upload.onprogress = function(e) {

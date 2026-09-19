@@ -30,7 +30,13 @@ def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 
 # Prevent the original app startup event from attempting to connect to MySQL
-app.router.on_startup.clear()
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def test_lifespan(app_instance):
+    yield
+
+app.router.lifespan_context = test_lifespan
 
 @pytest.fixture(scope="module")
 def client():

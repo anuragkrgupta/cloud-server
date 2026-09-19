@@ -63,12 +63,15 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
 
     access_token = create_access_token(data={"sub": user.email})
 
+    samesite_val = "none" if settings.IS_PRODUCTION else "lax"
+    secure_val = True if settings.IS_PRODUCTION else False
+
     response.set_cookie(
         key=COOKIE_NAME,
         value=access_token,
         httponly=True,
-        secure=settings.IS_PRODUCTION,
-        samesite="lax",
+        secure=secure_val,
+        samesite=samesite_val,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
@@ -78,7 +81,14 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
 
 @router.post("/api/logout", response_model=Message)
 def logout(response: Response):
-    response.delete_cookie(key=COOKIE_NAME, path="/")
+    samesite_val = "none" if settings.IS_PRODUCTION else "lax"
+    secure_val = True if settings.IS_PRODUCTION else False
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        samesite=samesite_val,
+        secure=secure_val,
+    )
     return Message(message="Logged out.")
 
 @router.get("/api/me", response_model=UserOut)

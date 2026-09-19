@@ -17,24 +17,24 @@ def get_auth_token_with_telegram(client):
         
     return token
 
-@patch("app.routes.files.upload_chunk_to_telegram", new_callable=AsyncMock)
-def test_upload_chunk(mock_upload, client):
+@patch("app.services.telegram_service.upload_stream_to_telegram", new_callable=AsyncMock)
+def test_upload_stream(mock_upload, client):
+    mock_upload.return_value = 42
     token = get_auth_token_with_telegram(client)
     
+    content = b"hello world stream"
     response = client.post(
-        "/api/upload/chunk",
-        headers={"Authorization": f"Bearer {token}"},
-        data={
-            "file_id": 1,
-            "start_part_index": 0,
-            "total_parts": 1,
-            "is_big": False
+        "/api/upload/stream?filename=test.txt",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Length": str(len(content)),
         },
-        files={"file": ("test.txt", b"hello world")}
+        content=content,
     )
     
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+    assert response.json()["message_id"] == 42
     mock_upload.assert_called_once()
 
 def test_complete_upload_and_get_files(client):

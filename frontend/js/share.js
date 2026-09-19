@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Fetch file info
-    fetch('/api/shared/' + token)
+    apiFetch('/api/shared/' + token)
     .then(function(res) {
         if (!res.ok) throw new Error('File not found or link expired.');
         return res.json();
@@ -43,7 +43,7 @@ function showError(msg) {
 }
 
 function checkAuth(token) {
-    fetch('/api/me')
+    apiFetch('/api/me')
     .then(function(r) { return r.ok ? r.json() : Promise.reject('unauth'); })
     .then(function(user) {
         if (!user.is_telegram_connected) {
@@ -69,7 +69,7 @@ function saveFile(token) {
     btn.disabled = true;
     btn.innerHTML = '<span class="animate-pulse">Transferring...</span>';
     
-    fetch('/api/shared/' + token + '/save', { method: 'POST' })
+    apiFetch('/api/shared/' + token + '/save', { method: 'POST' })
     .then(function(res) {
         return res.json().then(function(data) {
             if (!res.ok) throw new Error(data.detail || 'Failed to save file');

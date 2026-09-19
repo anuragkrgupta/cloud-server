@@ -1,7 +1,7 @@
 import asyncio
 import os
 import requests
-import jwt
+from jose import jwt
 from datetime import datetime, timedelta
 
 # Create a dummy small file
@@ -62,4 +62,5 @@ if response.status_code == 200:
     else:
         print("TEST FAILED")
 
-os.remove(FILE_NAME)
+if os.path.exists(FILE_NAME):
+    os.remove(FILE_NAME)

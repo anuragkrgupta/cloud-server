@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "outputDirectory": "frontend",
+  "cleanUrls": true,
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
+}

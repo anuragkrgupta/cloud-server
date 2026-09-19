@@ -4,7 +4,7 @@ const errorBox = document.getElementById('error-box');
 const submitBtn = document.getElementById('submit-btn');
 
 // Check if already logged in
-fetch('/api/me').then(async res => {
+apiFetch('/api/me').then(async res => {
   if (res.ok) {
     const user = await res.json();
     
@@ -46,14 +46,19 @@ form.addEventListener('submit', async (e) => {
   };
 
   try {
-    const res = await fetch('/api/login', {
+    const res = await apiFetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
-      const meRes = await fetch('/api/me');
+      const tokenData = await res.json();
+      if (tokenData.access_token) {
+        setAuthToken(tokenData.access_token);
+      }
+
+      const meRes = await apiFetch('/api/me');
       if (meRes.ok) {
          const user = await meRes.json();
          

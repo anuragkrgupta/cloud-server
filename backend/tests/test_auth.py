@@ -60,3 +60,18 @@ def test_protected_route_authenticated(client):
     )
     assert response.status_code == 200
     assert response.json()["email"] == "test4@example.com"
+
+def test_cors_preflight_and_headers(client):
+    # Preflight OPTIONS request from a Vercel domain
+    response = client.options(
+        "/api/me",
+        headers={
+            "Origin": "https://telegram-cloud.vercel.app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        }
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://telegram-cloud.vercel.app"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+

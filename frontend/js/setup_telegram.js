@@ -1,5 +1,5 @@
 // Check auth state
-fetch('/api/me').then(async res => {
+apiFetch('/api/me').then(async res => {
     if (!res.ok) {
         window.location.href = '/login.html';
     } else {
@@ -47,7 +47,7 @@ function showSuccess(msg) {
 
 async function startQRLogin() {
     try {
-        const res = await fetch('/api/telegram/qr-start', {
+        const res = await apiFetch('/api/telegram/qr-start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -84,7 +84,7 @@ async function startQRLogin() {
 
 async function checkStatus(token) {
     try {
-        const res = await fetch(`/api/telegram/qr-status?token=${token}`);
+        const res = await apiFetch(`/api/telegram/qr-status?token=${token}`);
         const data = await res.json();
 
         if (data.status === 'success') {
@@ -130,7 +130,7 @@ btnSubmit2fa.addEventListener('click', async () => {
     loadingMsg.classList.remove('hidden');
     
     try {
-        const res = await fetch('/api/telegram/2fa', {
+        const res = await apiFetch('/api/telegram/2fa', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: currentToken, password: password })
@@ -172,7 +172,7 @@ btnOverrideMismatch.addEventListener('click', async () => {
     loadingMsg.classList.remove('hidden');
     
     try {
-        const res = await fetch('/api/telegram/override-mismatch', {
+        const res = await apiFetch('/api/telegram/override-mismatch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: currentToken })
@@ -199,6 +199,7 @@ btnCancelMismatch.addEventListener('click', () => {
 
 btnLogout.addEventListener('click', async () => {
     if (pollInterval) clearInterval(pollInterval);
-    await fetch('/api/logout', { method: 'POST' });
+    await apiFetch('/api/logout', { method: 'POST' });
+    clearAuthToken();
     window.location.href = '/login.html';
 });
