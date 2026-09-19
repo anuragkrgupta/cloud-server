@@ -3,16 +3,28 @@ const errorBox = document.getElementById('error-box');
 const submitBtn = document.getElementById('submit-btn');
 
 // Check if already logged in
-apiFetch('/api/me').then(async res => {
-  if (res.ok) {
-    const user = await res.json();
-    if (user.is_telegram_connected) {
-        window.location.href = '/dashboard.html';
-    } else {
-        window.location.href = '/setup_telegram.html';
-    }
-  }
-});
+const token = getAuthToken();
+
+if (token) {
+  apiFetch('/api/me')
+    .then(async res => {
+      if (res.ok) {
+        const user = await res.json();
+
+        if (user.is_telegram_connected) {
+          window.location.href = '/dashboard.html';
+        } else {
+          window.location.href = '/setup_telegram.html';
+        }
+      } else if (res.status === 401) {
+        // Token is invalid/expired
+        clearAuthToken();
+      }
+    })
+    .catch(err => {
+      console.error('Auth check failed:', err);
+    });
+}
 
 function showError(message) {
   errorBox.textContent = message;
