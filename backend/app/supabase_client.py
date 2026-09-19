@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_supabase_url: str = os.environ.get("SUPABASE_URL", "")
-_supabase_key: str = os.environ.get("SUPABASE_KEY", "")
+_supabase_url: str = os.environ.get("SUPABASE_URL", "//uaphkllilngdpikwuqhd.supabase.co")
+_supabase_key: str = os.environ.get("SUPABASE_KEY", "sb_publishable_Y3Vzm07Wa2Cmvy1y9NNS5A_U7OYtmV4")
 
 if not _supabase_url or not _supabase_key:
     raise RuntimeError(
