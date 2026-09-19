@@ -29,4 +29,4 @@ services:
       - key: DB_NAME
         value: cloud_db
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: "https://cloud-server-phi.vercel.app"
