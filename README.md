@@ -1,6 +1,6 @@
 # Telegram Cloud Storage Web App
 
-A cloud storage web application that uses **Telegram** as an unlimited backend storage layer. Uploaded files are stored inside a private Telegram channel created automatically for each user, while metadata is managed locally via a **MySQL** database.
+A cloud storage web application that uses **Telegram** as an unlimited backend storage layer. Uploaded files are stored inside a private Telegram channel created automatically for each user, while metadata is managed locally via a **PostgreSQL (Supabase)** database.
 
 Files of any size are supported by automatically chunking, streaming, and reassembling them across Telegram messages — both on upload and download — with no data ever written to the server's disk.
 
@@ -10,7 +10,7 @@ Files of any size are supported by automatically chunking, streaming, and reasse
 - **JWT Authentication** — Secure tokens with configurable expiry (default 60 min).
 - **QR Code Telegram Login** — Links a Telegram account via QR scan. Supports 2FA.
 - **AES/Fernet Encryption** — Telegram session strings are encrypted at rest using `JWT_SECRET_KEY`.
-- **MySQL Database** — `users`, `files`, and `file_parts` tables managed via SQLAlchemy ORM.
+- **PostgreSQL (Supabase) Database** — `users`, `files`, and `file_parts` tables managed via SQLAlchemy ORM.
 
 ### Uploads
 - **Bypasses 2GB limit** — Files > 1.9 GB are split into sequential "volumes".
@@ -35,7 +35,7 @@ Files of any size are supported by automatically chunking, streaming, and reasse
 |---|---|
 | Frontend | HTML5, Vanilla JS, Tailwind CSS (CDN) |
 | Backend | Python 3.10+, FastAPI, Uvicorn |
-| Database | MySQL via SQLAlchemy ORM |
+| Database | PostgreSQL (Supabase) via SQLAlchemy ORM |
 | Telegram Client | Telethon (asyncio) |
 
 ---
@@ -43,7 +43,7 @@ Files of any size are supported by automatically chunking, streaming, and reasse
 ## Prerequisites
 
 - Python 3.10+
-- MySQL running at `localhost:3307`
+- PostgreSQL (Supabase) running at `localhost:3307`
 - Telegram API credentials from [my.telegram.org](https://my.telegram.org)
 
 ---
@@ -86,7 +86,7 @@ TG_API_HASH=your_api_hash
 ENVIRONMENT=development
 ```
 
-### 4. Create MySQL database
+### 4. Create PostgreSQL (Supabase) database
 
 ```sql
 CREATE DATABASE IF NOT EXISTS cloud_db;
@@ -99,9 +99,9 @@ All tables are created automatically by SQLAlchemy on first startup.
 Every time you want to start or resume working on your cloud server, follow these exact steps:
 
 **Step 1: Start the Database**
-Because this app relies on MySQL, your database must be running first.
+Because this app relies on PostgreSQL (Supabase), your database must be running first.
 1. Open your database manager (like **XAMPP Control Panel** or Docker).
-2. Start the **MySQL** module.
+2. Start the **PostgreSQL (Supabase)** module.
 3. Ensure it is running on the port specified in your `.env` (default is `3307`).
 
 **Step 2: Start the Python Backend**

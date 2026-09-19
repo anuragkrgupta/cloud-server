@@ -21,17 +21,18 @@ def run_migration():
                 print("Error adding column:", e)
         
         try:
-            # For MySQL
+            # For PostgreSQL (Supabase)
             conn.execute(text("""
                 UPDATE file_parts fp
-                JOIN files f ON fp.file_id = f.id
+                SET channel_id = u.channel_id
+                FROM files f
                 JOIN users u ON f.user_id = u.id
-                SET fp.channel_id = u.channel_id
-                WHERE fp.channel_id IS NULL
+                WHERE fp.file_id = f.id
+                AND fp.channel_id IS NULL
             """))
-            print("Backfilled channel_id for MySQL.")
+            print("Backfilled channel_id for PostgreSQL.")
         except Exception as e:
-            print("MySQL update failed, trying SQLite syntax...", e)
+            print("PostgreSQL update failed, trying SQLite syntax...", e)
             try:
                 # For SQLite
                 conn.execute(text("""

@@ -63,7 +63,7 @@ Browser
   |
   |  HTTP (cookie auth)
   v
-FastAPI (Uvicorn)  ---- SQLAlchemy ---> MySQL (cloud_db)
+FastAPI (Uvicorn)  ---- SQLAlchemy ---> PostgreSQL (Supabase) (cloud_db)
   |                        |
   |                   users, files, file_parts
   |
@@ -73,7 +73,7 @@ Telegram API
   +-- Private Channel (one per user, stores actual file bytes as messages)
 ```
 
-**Key design decision:** Telegram is used as a dumb blob store. Files are split into <=1.9 GB "volumes", each uploaded as a single Telegram document message. MySQL only stores message IDs + metadata — never file bytes.
+**Key design decision:** Telegram is used as a dumb blob store. Files are split into <=1.9 GB "volumes", each uploaded as a single Telegram document message. PostgreSQL (Supabase) only stores message IDs + metadata — never file bytes.
 
 ---
 
@@ -168,7 +168,7 @@ Browser -> POST /api/upload/stream (Raw Body) -> Backend -> Telegram
 5. **Finalization:**
    After the stream finishes, the backend instantly issues a final send command to assemble the parts into a document message in the private channel, returning the `message_id`.
 6. **DB Commit:**
-   Frontend calls `POST /api/upload/complete` with the array of `message_ids` (one per volume) to link them to a single `FileRecord` in MySQL.
+   Frontend calls `POST /api/upload/complete` with the array of `message_ids` (one per volume) to link them to a single `FileRecord` in PostgreSQL (Supabase).
 
 ### Connection Lifecycle & Leak Prevention
 ```python
@@ -273,10 +273,10 @@ File: backend/app/config.py — class Settings
 
 | Variable | Default | Description |
 |---|---|---|
-| DB_HOST | localhost | MySQL host |
-| DB_PORT | 3307 | Non-standard port — check your MySQL install |
-| DB_USER | root | MySQL user |
-| DB_PASSWORD | (empty) | MySQL password |
+| DB_HOST | localhost | PostgreSQL (Supabase) host |
+| DB_PORT | 3307 | Non-standard port — check your PostgreSQL (Supabase) install |
+| DB_USER | root | PostgreSQL (Supabase) user |
+| DB_PASSWORD | (empty) | PostgreSQL (Supabase) password |
 | DB_NAME | cloud_db | Must be created manually before first run |
 | JWT_SECRET_KEY | (required) | Also derives the Fernet encryption key |
 | JWT_ALGORITHM | HS256 | JWT signing algorithm |
@@ -286,10 +286,10 @@ File: backend/app/config.py — class Settings
 | ENVIRONMENT | development | Set to "production" for secure cookies |
 
 DATABASE_URL property format:
-  mysql+mysqlconnector://root@localhost:3307/cloud_db
+  PostgreSQL (Supabase)+PostgreSQL (Supabase)connector://root@localhost:3307/cloud_db
 
 SQLAlchemy engine options:
-  pool_pre_ping=True    -- avoids "MySQL server has gone away" on idle connections
+  pool_pre_ping=True    -- avoids "PostgreSQL (Supabase) server has gone away" on idle connections
   pool_recycle=3600     -- recycles connections older than 1 hour
 
 ---

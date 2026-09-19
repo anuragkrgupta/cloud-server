@@ -20,6 +20,6 @@ The "Cloud Server" is a web-based application that leverages the Telegram API (v
 ## Technical Requirements
 - **Frontend:** HTML, CSS, JavaScript (Vanilla). Hosted on Vercel.
 - **Backend:** Python (FastAPI). Hosted on Render.
-- **Database:** MySQL for user and file metadata.
+- **Database:** PostgreSQL (Supabase) for user and file metadata.
 - **Storage:** Telegram (via Telethon) using multi-connection pools.
 - **Communication:** RESTful APIs with strict CORS configurations for cross-origin frontend-backend interaction.

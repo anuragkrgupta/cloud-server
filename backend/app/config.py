@@ -23,7 +23,7 @@ def _require(name: str, default: str | None = None) -> str:
 class Settings:
     # Database configuration
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
-    DB_PORT: str = os.getenv("DB_PORT", "3307")
+    DB_PORT: str = os.getenv("DB_PORT", "5432")
     DB_USER: str = os.getenv("DB_USER", "root")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_NAME: str = os.getenv("DB_NAME", "cloud_db")
@@ -34,14 +34,14 @@ class Settings:
         # If full DATABASE_URL is provided (e.g., in cloud environments like Render), use it
         if self._DATABASE_URL:
             url = self._DATABASE_URL
-            # Normalize plain mysql:// to mysql+pymysql:// for SQLAlchemy 2.0+
-            if url.startswith("mysql://"):
-                url = url.replace("mysql://", "mysql+pymysql://", 1)
+            # Normalize postgres:// to postgresql:// for SQLAlchemy 1.4+
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
             return url
 
         pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
         return (
-            f"mysql+pymysql://{self.DB_USER}{pwd}"
+            f"postgresql://{self.DB_USER}{pwd}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
 

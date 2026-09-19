@@ -17,7 +17,7 @@ The Cloud Server utilizes a decoupled architecture where the frontend and backen
 - **Concurrency:** Fully asynchronous handling of requests, parallel chunk streaming, and background tasks (for inter-user file transfers).
 - **Lifecycle Management:** Uses FastAPI `lifespan` context managers to gracefully handle database connections and disconnect Telegram clients on shutdown.
 
-### 3. Database (MySQL)
+### 3. Database (PostgreSQL (Supabase))
 - **Models:**
   - `User`: Stores credentials, Telegram session string, and designated `channel_id`.
   - `FileRecord`: Stores file metadata (original name, size, sharing token, shared state).
@@ -36,7 +36,7 @@ The Cloud Server utilizes a decoupled architecture where the frontend and backen
 3. Backend creates a pool of authenticated MTProto connections (`DCSenderPool`).
 4. The file stream is consumed, chunked (512KB), and dispatched round-robin to the connection pool.
 5. Telegram returns a `message_id` for the assembled document.
-6. Backend stores file metadata and `FilePartRecord` in the MySQL database.
+6. Backend stores file metadata and `FilePartRecord` in the PostgreSQL (Supabase) database.
 7. Backend returns success response to the frontend.
 
 ## Data Flow (File Transfer Between Users)
