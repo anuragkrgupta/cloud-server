@@ -20,5 +20,9 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
       - key: ALLOWED_ORIGINS
         value: "https://cloud-server-phi.vercel.app"
