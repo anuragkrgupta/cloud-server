@@ -273,11 +273,9 @@ File: backend/app/config.py — class Settings
 
 | Variable | Default | Description |
 |---|---|---|
-| DB_HOST | localhost | PostgreSQL (Supabase) host |
-| DB_PORT | 3307 | Non-standard port — check your PostgreSQL (Supabase) install |
-| DB_USER | root | PostgreSQL (Supabase) user |
-| DB_PASSWORD | (empty) | PostgreSQL (Supabase) password |
-| DB_NAME | cloud_db | Must be created manually before first run |
+| DATABASE_URL | (empty) | Supabase PostgreSQL connection string (Transaction Pooler recommended) |
+| SUPABASE_URL | (empty) | Project URL for SDK |
+| SUPABASE_KEY | (empty) | Anon/Service key for SDK |
 | JWT_SECRET_KEY | (required) | Also derives the Fernet encryption key |
 | JWT_ALGORITHM | HS256 | JWT signing algorithm |
 | ACCESS_TOKEN_EXPIRE_MINUTES | 60 | Token lifetime |
@@ -286,7 +284,7 @@ File: backend/app/config.py — class Settings
 | ENVIRONMENT | development | Set to "production" for secure cookies |
 
 DATABASE_URL property format:
-  PostgreSQL (Supabase)+PostgreSQL (Supabase)connector://root@localhost:3307/cloud_db
+  postgresql://postgres:[password]@aws-0-[region].pooler.supabase.com:6543/postgres
 
 SQLAlchemy engine options:
   pool_pre_ping=True    -- avoids "PostgreSQL (Supabase) server has gone away" on idle connections
@@ -296,9 +294,8 @@ SQLAlchemy engine options:
 
 ## 10. Known Gotchas & Bugs
 
-### _ensure_database_exists() is commented out
-database.py has a utility that auto-creates cloud_db, but it's disabled (commented out).
-The database must be created manually with: CREATE DATABASE IF NOT EXISTS cloud_db;
+### _ensure_database_exists()
+database.py used to auto-create cloud_db for MySQL, but since switching to Supabase PostgreSQL, we don't need this step. It's disabled.
 
 ### pending_logins does not survive restarts
 Any server restart (including --reload hot-reloads triggered by file saves) clears pending_logins.

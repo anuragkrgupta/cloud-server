@@ -43,7 +43,7 @@ Files of any size are supported by automatically chunking, streaming, and reasse
 ## Prerequisites
 
 - Python 3.10+
-- PostgreSQL (Supabase) running at `localhost:3307`
+- A Supabase Project (for the PostgreSQL database)
 - Telegram API credentials from [my.telegram.org](https://my.telegram.org)
 
 ---
@@ -70,11 +70,8 @@ pip install -r requirements.txt
 Create `backend/.env` from `.env.example`:
 
 ```env
-DB_HOST=localhost
-DB_PORT=3307
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=cloud_db
+# Supabase PostgreSQL Connection String (Transaction Pooler)
+DATABASE_URL="postgresql://postgres:[your_password]@aws-0-[region].pooler.supabase.com:6543/postgres"
 
 JWT_SECRET_KEY=your_very_long_random_secret_string
 JWT_ALGORITHM=HS256
@@ -86,25 +83,16 @@ TG_API_HASH=your_api_hash
 ENVIRONMENT=development
 ```
 
-### 4. Create PostgreSQL (Supabase) database
+### 4. Database Setup
 
-```sql
-CREATE DATABASE IF NOT EXISTS cloud_db;
-```
-
-All tables are created automatically by SQLAlchemy on first startup.
+Your database is hosted on Supabase. 
+All tables are created automatically by SQLAlchemy on first startup when it connects via your `DATABASE_URL`.
 
 ### 5. Starting the Server
 
-Every time you want to start or resume working on your cloud server, follow these exact steps:
+Every time you want to start or resume working on your cloud server locally, follow these exact steps:
 
-**Step 1: Start the Database**
-Because this app relies on PostgreSQL (Supabase), your database must be running first.
-1. Open your database manager (like **XAMPP Control Panel** or Docker).
-2. Start the **PostgreSQL (Supabase)** module.
-3. Ensure it is running on the port specified in your `.env` (default is `3307`).
-
-**Step 2: Start the Python Backend**
+**Step 1: Start the Python Backend**
 Open a terminal in the `backend` directory, activate your virtual environment, and start the Uvicorn server:
 ```bash
 cd backend
