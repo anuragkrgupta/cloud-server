@@ -41,6 +41,7 @@ class DCSenderPool:
         if self.dc_id != self.client.session.dc_id:
             if self._exported_auth is None:
                 self._exported_auth = await self.client(ExportAuthorizationRequest(self.dc_id))
+            assert self._exported_auth is not None
             req = ImportAuthorizationRequest(
                 id=self._exported_auth.id, bytes=self._exported_auth.bytes
             )
@@ -79,8 +80,9 @@ async def upload_stream_parallel(
     pending: dict[int, Optional[asyncio.Task]] = {i: None for i in range(workers)}
 
     async def send_part(sender_idx: int, part_index: int, data: bytes):
-        if pending[sender_idx] is not None:
-            await pending[sender_idx]
+        task = pending[sender_idx]
+        if task is not None:
+            await task
         req = (
             SaveBigFilePartRequest(file_id, part_index, part_count, data)
             if is_big else
@@ -115,7 +117,9 @@ async def upload_stream_parallel(
 
     if is_big:
         return InputFileBig(file_id, part_count, "upload")
-    return InputFile(file_id, part_count, "upload", md5.hexdigest())
+    
+    md5_hash = md5.hexdigest() if md5 else ""
+    return InputFile(file_id, part_count, "upload", md5_hash)
 
 
 async def download_message_parallel(

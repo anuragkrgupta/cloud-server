@@ -59,18 +59,16 @@ async def transfer_file_between_users(source_user_id: int, target_user_id: int, 
         logger.info(f"Starting background transfer of file {source_file.original_name} from user {source_user_id} to {target_user_id}")
         
         # Do the upload to target
-        sent_messages = await upload_stream_parallel(
-            target_client,
-            target_entity,
-            combined_stream(),
-            filename=source_file.original_name,
-            total_size=source_file.file_size,
-            mime_type=source_file.mime_type or "application/octet-stream",
-            workers=settings.WORKERS_PER_TRANSFER,
-            part_size_kb=settings.PART_SIZE_KB
+        from app.services.telegram_service import upload_stream_to_telegram
+        msg_id = await upload_stream_to_telegram(
+            target_user.telegram_session,
+            target_user.channel_id,
+            source_file.original_name,
+            source_file.file_size,
+            combined_stream()
         )
         
-        if not sent_messages:
+        if not msg_id:
             raise Exception("Transfer uploaded 0 messages.")
             
         # Success! Now save to DB
@@ -86,14 +84,13 @@ async def transfer_file_between_users(source_user_id: int, target_user_id: int, 
         db.commit()
         db.refresh(new_file)
         
-        for idx, msg in enumerate(sent_messages):
-            part_record = FilePartRecord(
-                file_id=new_file.id,
-                part_index=idx,
-                telegram_message_id=msg.id,
-                channel_id=target_user.channel_id
-            )
-            db.add(part_record)
+        part_record = FilePartRecord(
+            file_id=new_file.id,
+            part_index=0,
+            telegram_message_id=msg_id,
+            channel_id=target_user.channel_id
+        )
+        db.add(part_record)
         
         db.commit()
         logger.info(f"Successfully transferred file {new_file.id} to user {target_user_id}")
