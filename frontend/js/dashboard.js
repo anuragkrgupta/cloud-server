@@ -388,7 +388,7 @@ el('upload-form').addEventListener('submit', function(e){
 
         return new Promise(function(resolve, reject) {
             var xhr = new XMLHttpRequest();
-            var url = getApiUrl('/api/upload/stream?filename=' + encodeURIComponent(file.name));
+            var url = getApiUrl('/api/upload/stream?filename=' + encodeURIComponent(file.name) + '&filesize=' + vsz);
             xhr.open('POST', url, true);
             xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
             xhr.withCredentials = true;
