@@ -2,13 +2,11 @@
 // api.js — Unified API Client & Authentication Helpers
 // ============================================================
 
-/**
- * Returns the fully qualified URL for any API endpoint path.
- * If window.API_BASE_URL is set (e.g. on Vercel), it prepends the backend URL.
- * Otherwise, it uses the relative path (for local dev or same-origin backend hosting).
- */
 function getApiUrl(path) {
-    var base = (window.API_BASE_URL || localStorage.getItem('api_base_url') || '').trim();
+    // Auto-detect environment:
+    var isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    var base = isLocal ? 'http://127.0.0.1:8000' : 'https://cloud-server-eazn.onrender.com';
+    
     base = base.replace(/\/+$/, '');
     if (!path.startsWith('/')) {
         path = '/' + path;
