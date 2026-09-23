@@ -7,7 +7,7 @@ function getApiUrl(path) {
     var hostname = window.location.hostname;
     var isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '';
     var base = isLocal ? 'http://127.0.0.1:8000' : 'https://cloud-server-eazn.onrender.com';
-    
+
     base = base.replace(/\/+$/, '');
     if (!path.startsWith('/')) {
         path = '/' + path;
@@ -36,17 +36,17 @@ function apiFetch(path, options) {
         options.credentials = 'include';
     }
 
-    return fetch(getApiUrl(path), options).then(function(res) {
+    return fetch(getApiUrl(path), options).then(function (res) {
         if (res.status === 400 || res.status === 401 || res.status === 403) {
             var clone = res.clone();
-            clone.json().then(function(data) {
+            clone.json().then(function (data) {
                 if (data && data.detail && typeof data.detail === 'string') {
                     var lower = data.detail.toLowerCase();
                     if (lower.includes('telegram session expired') || lower.includes('revoked') || lower.includes('unregistered')) {
                         window.location.href = '/setup_telegram.html';
                     }
                 }
-            }).catch(function(){});
+            }).catch(function () { });
         }
         return res;
     });
