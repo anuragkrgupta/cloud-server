@@ -53,11 +53,6 @@ form.addEventListener('submit', async (e) => {
     });
 
     if (res.ok) {
-      const tokenData = await res.json();
-      if (tokenData.access_token) {
-        setAuthToken(tokenData.access_token);
-      }
-
       const meRes = await apiFetch('/api/me');
       if (meRes.ok) {
          const user = await meRes.json();

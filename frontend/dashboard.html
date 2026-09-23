@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
@@ -11,33 +12,52 @@
             background-color: #0f172a;
             color: #f8fafc;
             background-image: radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15), transparent 25%),
-                              radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.15), transparent 25%);
+                radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.15), transparent 25%);
             touch-action: manipulation;
         }
+
         .glass-panel {
             background: rgba(30, 41, 59, 0.7);
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
+
         /* Speed bar animated fill */
         @keyframes speed-pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
         }
-        .speed-pulse { animation: speed-pulse 1.2s ease-in-out infinite; }
+
+        .speed-pulse {
+            animation: speed-pulse 1.2s ease-in-out infinite;
+        }
     </style>
 </head>
+
 <body class="min-h-screen p-4 flex justify-center items-center">
 
-    <div id="main-container" class="glass-panel p-8 rounded-2xl w-full max-w-2xl shadow-2xl relative overflow-hidden" style="display:none">
-        <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 pointer-events-none"></div>
+    <div id="main-container" class="glass-panel p-8 rounded-2xl w-full max-w-2xl shadow-2xl relative overflow-hidden"
+        style="display:none">
+        <div
+            class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 pointer-events-none">
+        </div>
 
         <div class="relative z-10 flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
             <div>
-                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">Dashboard</h1>
+                <h1
+                    class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
+                    Dashboard</h1>
                 <p class="text-slate-400 mt-1 text-sm">Welcome back, <span id="welcome-name">...</span>!</p>
             </div>
-            <button id="logout-btn" class="bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer">
+            <button id="logout-btn"
+                class="bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer">
                 Sign Out
             </button>
         </div>
@@ -79,41 +99,57 @@
             <h3 class="text-lg font-semibold text-slate-200 mb-4">Upload a File</h3>
             <form id="upload-form" class="space-y-4">
                 <div id="upload-msg" style="display:none" class="p-3 text-sm rounded-lg"></div>
-                
+
                 <div class="flex items-center justify-center w-full">
-                    <label for="file-upload" class="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-600 border-dashed rounded-lg cursor-pointer hover:bg-slate-800 hover:border-indigo-500 transition-all">
+                    <label for="file-upload"
+                        class="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-600 border-dashed rounded-lg cursor-pointer hover:bg-slate-800 hover:border-indigo-500 transition-all">
                         <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                            <svg class="w-8 h-8 mb-3 text-slate-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
-                                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                            <svg class="w-8 h-8 mb-3 text-slate-400" aria-hidden="true"
+                                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2" />
                             </svg>
-                            <p class="mb-2 text-sm text-slate-400"><span class="font-semibold text-indigo-400">Click to upload</span> or drag and drop</p>
+                            <p class="mb-2 text-sm text-slate-400"><span class="font-semibold text-indigo-400">Click to
+                                    upload</span> or drag and drop</p>
                             <p class="text-xs text-slate-500" id="file-name-display">No file selected</p>
                         </div>
                         <input id="file-upload" type="file" class="hidden" required />
                     </label>
                 </div>
-                
-                <button type="submit" id="btn-upload" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2 rounded-lg transition-all shadow-lg hover:shadow-indigo-500/25">
+
+                <button type="submit" id="btn-upload"
+                    class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium py-2 rounded-lg transition-all shadow-lg hover:shadow-indigo-500/25">
                     Upload to Cloud
                 </button>
 
-                <div class="mt-3 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg flex items-start text-xs text-indigo-300">
-                    <svg class="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <div
+                    class="mt-3 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg flex items-start text-xs text-indigo-300">
+                    <svg class="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
                     <div>
                         <strong class="font-medium text-indigo-200">Notice on Upload Speeds:</strong><br>
-                        Telegram enforces strict speed limits file uploads (typically ~2-3 MB/s, sometimes lower without Telegram Premium). The system uploads your file sequentially as fast as Telegram allows to ensure perfect stability.
+                        Telegram enforces strict speed limits file uploads (typically ~1-2 MB/s, sometimes lower without
+                        Telegram Premium). The system uploads your file sequentially as fast as Telegram allows to
+                        ensure perfect stability.
                     </div>
                 </div>
 
                 <!-- Upload speed panel (shown during upload) -->
-                <div id="upload-speed-panel" style="display:none" class="mt-3 bg-slate-800/60 border border-slate-700 rounded-xl p-4 space-y-3">
+                <div id="upload-speed-panel" style="display:none"
+                    class="mt-3 bg-slate-800/60 border border-slate-700 rounded-xl p-4 space-y-3">
                     <div class="flex justify-between items-center text-xs text-slate-400">
                         <span class="font-semibold text-slate-200 uppercase tracking-wide">Upload Progress</span>
                         <span id="upload-eta" class="text-slate-400">—</span>
                     </div>
                     <!-- Progress bar -->
                     <div class="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
-                        <div id="upload-progress-bar" class="h-2 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 speed-pulse" style="width:0%"></div>
+                        <div id="upload-progress-bar"
+                            class="h-2 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-300 speed-pulse"
+                            style="width:0%"></div>
                     </div>
                     <!-- Stats row -->
                     <div class="grid grid-cols-3 gap-2 text-center">
@@ -142,19 +178,23 @@
             </ul>
         </div>
 
-    <div id="loading-screen" class="absolute inset-0 flex items-center justify-center bg-slate-900 z-50">
-        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
-    </div>
-    
-    <script>
-        // Remove loading screen when JS loads and checks auth
-        window.hideLoadingScreen = function() {
-            var loader = document.getElementById('loading-screen');
-            if (loader) loader.style.display = 'none';
-        };
-    </script>
-    <script src="/js/config.js"></script>
-    <script src="/js/api.js"></script>
-    <script src="/js/dashboard.js?v=20240823_stream"></script>
+        <div id="loading-screen" class="absolute inset-0 flex items-center justify-center bg-slate-900 z-50">
+            <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+        </div>
+
+        <!-- Toast Notification Container -->
+        <div id="toast-container" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 flex flex-col items-center space-y-2 z-50"></div>
+
+        <script>
+            // Remove loading screen when JS loads and checks auth
+            window.hideLoadingScreen = function () {
+                var loader = document.getElementById('loading-screen');
+                if (loader) loader.style.display = 'none';
+            };
+        </script>
+        <script src="/js/config.js"></script>
+        <script src="/js/api.js"></script>
+        <script src="/js/dashboard.js?v=20240823_stream"></script>
 </body>
+
 </html>

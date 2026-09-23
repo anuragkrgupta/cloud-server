@@ -177,4 +177,4 @@ async def upload_volume_stream(
         )
         return {"status": "success", "message_id": message_id}
     except Exception as e:
-        raise HTTPException(500, f"Upload failed: {str(e)}")
+        handle_telegram_error(e, db, current_user)

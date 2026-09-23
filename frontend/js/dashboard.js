@@ -2,6 +2,40 @@
 // dashboard.js — Upload & Download with live speed display
 // ============================================================
 
+// ---- Toast Notifications ----------------------------------------------
+window.showToast = function(msg, type = 'success') {
+    var container = document.getElementById('toast-container');
+    if (!container) {
+        alert(msg);
+        return;
+    }
+    
+    var el = document.createElement('div');
+    var bgColor = type === 'error' ? 'bg-red-500/90' : 'bg-emerald-500/90';
+    el.className = bgColor + ' text-white px-4 py-2 rounded-full shadow-lg text-sm font-medium transition-all duration-300 opacity-0 translate-y-4';
+    el.innerText = msg;
+    
+    // Add icon if success or error
+    var icon = type === 'error' ? '⚠️ ' : '✅ ';
+    el.innerText = icon + msg;
+    
+    container.appendChild(el);
+    
+    // Animate in
+    setTimeout(() => {
+        el.classList.remove('opacity-0', 'translate-y-4');
+        el.classList.add('opacity-100', 'translate-y-0');
+    }, 10);
+    
+    // Animate out after 3 seconds
+    setTimeout(() => {
+        el.classList.remove('opacity-100', 'translate-y-0');
+        el.classList.add('opacity-0', 'translate-y-4');
+        setTimeout(() => el.remove(), 300);
+    }, 3000);
+};
+
+
 // ---- Formatters --------------------------------------------------------
 
 function formatBytes(b) {
@@ -92,13 +126,11 @@ apiFetch('/api/me')
 })
 .catch(function(){ 
     if (window.hideLoadingScreen) window.hideLoadingScreen();
-    clearAuthToken();
     location.href='/login.html'; 
 });
 
 el('logout-btn').addEventListener('click', function(){
     apiFetch('/api/logout',{method:'POST'}).finally(function(){ 
-        clearAuthToken(); 
         location.href='/login.html'; 
     });
 });
@@ -192,13 +224,13 @@ window.shareFile = function(id) {
     .then(function(data){
         var url = window.location.origin + data.url;
         navigator.clipboard.writeText(url).then(function(){
-            alert('Share link copied to clipboard:\n' + url);
+            showToast('Share link copied to clipboard!');
         }).catch(function(){
             prompt('Copy this link:', url);
         });
     })
     .catch(function(e){
-        alert('Failed to share file.');
+        showToast('Failed to share file.', 'error');
     });
 };
 
@@ -358,10 +390,7 @@ el('upload-form').addEventListener('submit', function(e){
             var xhr = new XMLHttpRequest();
             var url = getApiUrl('/api/upload/stream?filename=' + encodeURIComponent(file.name));
             xhr.open('POST', url, true);
-            var token = getAuthToken();
-            if (token) {
-                xhr.setRequestHeader('Authorization', 'Bearer ' + token);
-            }
+            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
             xhr.withCredentials = true;
             
             var lastLoaded = 0;

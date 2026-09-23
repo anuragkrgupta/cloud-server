@@ -62,6 +62,57 @@ async def _get_upload_client(file_id: int, session_string: str) -> TelegramClien
         }
     return _upload_clients[file_id]["client"]
 
+async def _finalize_login(
+    token_id: str, 
+    client: TelegramClient, 
+    tg_user_id: str, 
+    u_channel_id: str = None, 
+    u_tg_user_id: str = None, 
+    force_new_channel: bool = False
+) -> dict:
+    """
+    Helper to perform post-login checks and setup.
+    Handles account mismatch, channel creation, and session saving.
+    Returns the resulting info dict to be returned to the caller or saved in pending_logins.
+    """
+    if u_channel_id and u_tg_user_id and tg_user_id != u_tg_user_id and not force_new_channel:
+        session_str = client.session.save()
+        await client.disconnect()
+        return {
+            "status": "account_mismatch",
+            "session_string": session_str,
+            "tg_user_id": tg_user_id
+        }
+        
+    channel_id = u_channel_id
+    if not channel_id or force_new_channel:
+        # Create a private channel for Cloud Storage
+        try:
+            result = await client(CreateChannelRequest(
+                title=f"CloudStorage_{tg_user_id}",
+                about="Storage channel managed by Cloud Server Web App",
+                megagroup=False
+            ))
+            channel = result.chats[0]
+            channel_id = str(channel.id)
+        except Exception as e:
+            logger.error(f"Failed to create storage channel: {e}")
+    else:
+        try:
+            await get_resolved_entity(client, channel_id)
+        except Exception as e:
+            logger.warning(f"Failed to resolve existing channel during login: {e}")
+            
+    session_string = client.session.save()
+    await client.disconnect()
+    
+    return {
+        "status": "success",
+        "session_string": session_string,
+        "channel_id": channel_id,
+        "tg_user_id": tg_user_id
+    }
+
 async def start_qr_login(user_channel_id: str = None, user_tg_user_id: str = None) -> tuple[str, str]:
     """
     Initiates a Telegram connection and starts QR login.
@@ -81,40 +132,9 @@ async def start_qr_login(user_channel_id: str = None, user_tg_user_id: str = Non
             user = await qr.wait()
             tg_user_id = str(user.id)
             
-            if u_channel_id and u_tg_user_id and tg_user_id != u_tg_user_id:
-                pending_logins[tid]["status"] = "account_mismatch"
-                pending_logins[tid]["session_string"] = cli.session.save()
-                pending_logins[tid]["tg_user_id"] = tg_user_id
-                await cli.disconnect()
-                return
-
-            channel_id = u_channel_id
-            if not channel_id:
-                # Create a private channel for Cloud Storage
-                try:
-                    result = await cli(CreateChannelRequest(
-                        title=f"CloudStorage_{tg_user_id}",
-                        about="Storage channel managed by Cloud Server Web App",
-                        megagroup=False
-                    ))
-                    channel = result.chats[0]
-                    channel_id = str(channel.id)
-                except Exception as e:
-                    logger.error(f"Failed to create storage channel: {e}")
-            else:
-                try:
-                    await get_resolved_entity(cli, channel_id)
-                except Exception as e:
-                    logger.warning(f"Failed to resolve existing channel during login: {e}")
-                    
-            session_string = cli.session.save()
+            result = await _finalize_login(tid, cli, tg_user_id, u_channel_id, u_tg_user_id)
+            pending_logins[tid].update(result)
             
-            pending_logins[tid]["status"] = "success"
-            pending_logins[tid]["session_string"] = session_string
-            pending_logins[tid]["channel_id"] = channel_id
-            pending_logins[tid]["tg_user_id"] = tg_user_id
-            
-            await cli.disconnect()
             
         except SessionPasswordNeededError:
             logger.info(f"2FA required for {tid}")
@@ -154,43 +174,72 @@ async def submit_qr_password(token_id: str, password: str, force_new_channel: bo
         user = await client.sign_in(password=password)
         tg_user_id = str(user.id)
         
-        if u_channel_id and u_tg_user_id and tg_user_id != u_tg_user_id and not force_new_channel:
-            pending_logins[token_id]["status"] = "account_mismatch"
-            pending_logins[token_id]["session_string"] = client.session.save()
-            pending_logins[token_id]["tg_user_id"] = tg_user_id
-            await client.disconnect()
-            return {"status": "account_mismatch"}
-            
-        channel_id = u_channel_id
-        if not channel_id or force_new_channel:
-            # Create a private channel for Cloud Storage
-            try:
-                result = await client(CreateChannelRequest(
-                    title=f"CloudStorage_{tg_user_id}",
-                    about="Storage channel managed by Cloud Server Web App",
-                    megagroup=False
-                ))
-                channel = result.chats[0]
-                channel_id = str(channel.id)
-            except Exception as e:
-                logger.error(f"Failed to create storage channel: {e}")
-        else:
-            try:
-                await get_resolved_entity(client, channel_id)
-            except Exception as e:
-                logger.warning(f"Failed to resolve existing channel during login: {e}")
-                
-        session_string = client.session.save()
-        
-        pending_logins[token_id]["status"] = "success"
-        pending_logins[token_id]["session_string"] = session_string
-        pending_logins[token_id]["channel_id"] = channel_id
-        pending_logins[token_id]["tg_user_id"] = tg_user_id
-        
-        await client.disconnect()
-        return {"status": "success"}
+        result = await _finalize_login(token_id, client, tg_user_id, u_channel_id, u_tg_user_id, force_new_channel)
+        pending_logins[token_id].update(result)
+        return result
     except Exception as e:
         logger.error(f"Failed to submit 2FA password: {e}")
+        pending_logins[token_id]["status"] = "failed"
+        await client.disconnect()
+        return {"status": "failed", "error": str(e)}
+
+async def start_phone_login(phone_number: str, user_channel_id: str = None, user_tg_user_id: str = None) -> str:
+    """
+    Initiates a Telegram connection and requests a phone code.
+    Returns token_id.
+    """
+    token_id = str(uuid.uuid4())
+    session = StringSession()
+    client = TelegramClient(session, settings.TG_API_ID, settings.TG_API_HASH)
+    
+    await client.connect()
+    
+    try:
+        sent_code = await client.send_code_request(phone_number)
+        
+        pending_logins[token_id] = {
+            "status": "waiting_for_code",
+            "client": client,
+            "phone_number": phone_number,
+            "phone_code_hash": sent_code.phone_code_hash,
+            "user_channel_id": user_channel_id,
+            "user_tg_user_id": user_tg_user_id
+        }
+        return token_id
+    except Exception as e:
+        logger.error(f"Failed to send code for phone login: {e}")
+        await client.disconnect()
+        raise e
+
+async def submit_phone_code(token_id: str, code: str) -> dict:
+    if token_id not in pending_logins:
+        return {"status": "not_found"}
+        
+    info = pending_logins[token_id]
+    if info["status"] != "waiting_for_code":
+        return {"status": "invalid_state"}
+        
+    client = info["client"]
+    phone_number = info["phone_number"]
+    phone_code_hash = info["phone_code_hash"]
+    u_channel_id = info.get("user_channel_id")
+    u_tg_user_id = info.get("user_tg_user_id")
+    
+    try:
+        user = await client.sign_in(phone=phone_number, code=code, phone_code_hash=phone_code_hash)
+        tg_user_id = str(user.id)
+        
+        result = await _finalize_login(token_id, client, tg_user_id, u_channel_id, u_tg_user_id)
+        pending_logins[token_id].update(result)
+        return result
+        
+    except SessionPasswordNeededError:
+        logger.info(f"2FA required for {token_id}")
+        pending_logins[token_id]["status"] = "2fa_required"
+        # The client remains connected for 2FA submission.
+        return {"status": "2fa_required"}
+    except Exception as e:
+        logger.error(f"Failed to submit phone code: {e}")
         pending_logins[token_id]["status"] = "failed"
         await client.disconnect()
         return {"status": "failed", "error": str(e)}

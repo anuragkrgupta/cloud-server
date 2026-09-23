@@ -36,16 +36,23 @@ class DCSenderPool:
                 loggers=self.client._log, proxy=self.client._proxy,
             )
         )
-        # Only needed if this pool targets a DC different from the main
-        # session's home DC — same-DC senders inherit the auth key directly.
+        
+        import copy
+        from telethon.tl.functions.help import GetConfigRequest
+        init_req = copy.copy(self.client._init_request)
+
         if self.dc_id != self.client.session.dc_id:
             if self._exported_auth is None:
                 self._exported_auth = await self.client(ExportAuthorizationRequest(self.dc_id))
             assert self._exported_auth is not None
-            req = ImportAuthorizationRequest(
+            init_req.query = ImportAuthorizationRequest(
                 id=self._exported_auth.id, bytes=self._exported_auth.bytes
             )
-            await sender.send(InvokeWithLayerRequest(LAYER, req))
+        else:
+            init_req.query = GetConfigRequest()
+            
+        await sender.send(InvokeWithLayerRequest(LAYER, init_req))
+        
         return sender
 
     async def open(self):

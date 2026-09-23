@@ -68,8 +68,14 @@ class TelegramQRStartResponse(BaseModel):
 
 class TelegramQRStatusResponse(BaseModel):
     status: str
-    message: str | None = None
+    message: Optional[str] = None
 
+class TelegramPhoneStartRequest(BaseModel):
+    phone_number: str
+
+class TelegramPhoneCodeRequest(BaseModel):
+    token: str
+    phone_code: str
 
 class Telegram2FARequest(BaseModel):
     token: str

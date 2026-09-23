@@ -26,6 +26,17 @@ const mismatchWrapper = document.getElementById('mismatch-wrapper');
 const btnOverrideMismatch = document.getElementById('btn-override-mismatch');
 const btnCancelMismatch = document.getElementById('btn-cancel-mismatch');
 
+// Phone login elements
+const btnTabQr = document.getElementById('btn-tab-qr');
+const btnTabPhone = document.getElementById('btn-tab-phone');
+const phoneWrapper = document.getElementById('phone-wrapper');
+const phoneStep1 = document.getElementById('phone-step-1');
+const phoneStep2 = document.getElementById('phone-step-2');
+const phoneNumberInput = document.getElementById('phone-number');
+const phoneCodeInput = document.getElementById('phone-code');
+const btnSendCode = document.getElementById('btn-send-code');
+const btnVerifyCode = document.getElementById('btn-verify-code');
+
 let pollInterval = null;
 let currentToken = null;
 
@@ -117,6 +128,111 @@ async function checkStatus(token) {
     }
 }
 
+// ---- Tab Switching ----
+btnTabQr.addEventListener('click', () => {
+    btnTabQr.classList.add('border-indigo-500', 'text-indigo-400');
+    btnTabQr.classList.remove('border-transparent', 'text-slate-400');
+    btnTabPhone.classList.remove('border-indigo-500', 'text-indigo-400');
+    btnTabPhone.classList.add('border-transparent', 'text-slate-400');
+    
+    phoneWrapper.classList.add('hidden');
+    phoneWrapper.classList.remove('flex');
+    qrWrapper.classList.remove('hidden');
+    qrWrapper.classList.add('flex');
+});
+
+btnTabPhone.addEventListener('click', () => {
+    btnTabPhone.classList.add('border-indigo-500', 'text-indigo-400');
+    btnTabPhone.classList.remove('border-transparent', 'text-slate-400');
+    btnTabQr.classList.remove('border-indigo-500', 'text-indigo-400');
+    btnTabQr.classList.add('border-transparent', 'text-slate-400');
+    
+    qrWrapper.classList.add('hidden');
+    qrWrapper.classList.remove('flex');
+    phoneWrapper.classList.remove('hidden');
+    phoneWrapper.classList.add('flex');
+});
+
+// ---- Phone Login Logic ----
+btnSendCode.addEventListener('click', async () => {
+    const phone = phoneNumberInput.value.trim();
+    if (!phone) {
+        showError("Please enter your phone number.");
+        return;
+    }
+    
+    btnSendCode.disabled = true;
+    btnSendCode.textContent = "Sending...";
+    
+    try {
+        const res = await apiFetch('/api/telegram/phone-start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone_number: phone })
+        });
+        const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.detail || 'Failed to send code');
+        
+        currentToken = data.token;
+        phoneStep1.classList.add('hidden');
+        phoneStep2.classList.remove('hidden');
+        
+        // Stop QR polling if it was running
+        if (pollInterval) clearInterval(pollInterval);
+        
+    } catch (err) {
+        showError(err.message);
+        btnSendCode.disabled = false;
+        btnSendCode.textContent = "Send Code";
+    }
+});
+
+btnVerifyCode.addEventListener('click', async () => {
+    const code = phoneCodeInput.value.trim();
+    if (!code) {
+        showError("Please enter the code.");
+        return;
+    }
+    
+    btnVerifyCode.disabled = true;
+    btnVerifyCode.textContent = "Verifying...";
+    
+    try {
+        const res = await apiFetch('/api/telegram/phone-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: currentToken, phone_code: code })
+        });
+        const data = await res.json();
+        
+        if (!res.ok && data.status !== 'account_mismatch') throw new Error(data.detail || data.message || 'Failed to verify code');
+        
+        if (data.status === 'success') {
+            showSuccess('Telegram connected! Redirecting to dashboard...');
+            setTimeout(() => {
+                window.location.href = '/dashboard.html';
+            }, 1500);
+        } else if (data.status === '2fa_required') {
+            phoneWrapper.classList.add('hidden');
+            phoneWrapper.classList.remove('flex');
+            faWrapper.classList.remove('hidden');
+            faWrapper.classList.add('flex');
+        } else if (data.status === 'account_mismatch') {
+            phoneWrapper.classList.add('hidden');
+            phoneWrapper.classList.remove('flex');
+            mismatchWrapper.classList.remove('hidden');
+            mismatchWrapper.classList.add('flex');
+        } else {
+            throw new Error(data.message || 'Verification failed');
+        }
+    } catch (err) {
+        showError(err.message);
+        btnVerifyCode.disabled = false;
+        btnVerifyCode.textContent = "Verify Code";
+    }
+});
+
 btnSubmit2fa.addEventListener('click', async () => {
     const password = faPassword.value;
     if (!password) {
@@ -200,6 +316,5 @@ btnCancelMismatch.addEventListener('click', () => {
 btnLogout.addEventListener('click', async () => {
     if (pollInterval) clearInterval(pollInterval);
     await apiFetch('/api/logout', { method: 'POST' });
-    clearAuthToken();
     window.location.href = '/login.html';
 });

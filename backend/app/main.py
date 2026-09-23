@@ -7,7 +7,8 @@ Run with:
 """
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -46,10 +47,27 @@ if settings.ALLOWED_ORIGINS:
     origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
     cors_kwargs["allow_origins"] = origins
 else:
-    # Allow any HTTP/HTTPS origin (e.g. *.vercel.app, localhost, custom domains) while supporting credentials
-    cors_kwargs["allow_origin_regex"] = r"^https?://.*"
+    # Safe local defaults instead of a dangerous wildcard regex
+    cors_kwargs["allow_origins"] = [
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
 
 app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+@app.middleware("http")
+async def csrf_protect(request: Request, call_next):
+    # Enforce custom header for state-changing operations to statelessly mitigate CSRF
+    if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
+        if request.url.path.startswith("/api/"):
+            if not request.headers.get("x-requested-with"):
+                return JSONResponse(
+                    status_code=403, 
+                    content={"detail": "CSRF verification failed. Missing X-Requested-With header."}
+                )
+    return await call_next(request)
 
 # Register API routers
 app.include_router(auth_routes.router, tags=["auth"])
