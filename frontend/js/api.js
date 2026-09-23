@@ -4,7 +4,8 @@
 
 function getApiUrl(path) {
     // Auto-detect environment:
-    var isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    var hostname = window.location.hostname;
+    var isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '';
     var base = isLocal ? 'http://127.0.0.1:8000' : 'https://cloud-server-eazn.onrender.com';
     
     base = base.replace(/\/+$/, '');
