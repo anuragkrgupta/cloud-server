@@ -259,7 +259,10 @@ Under --reload, any file save restarts the worker and clears all pending logins.
 | register.html | Registration form |
 | setup_telegram.html | QR code display, status polling, 2FA input |
 | dashboard.html | File list table, upload button, download/delete |
+| share.html | UI for generating and displaying shareable links for files |
 | js/dashboard.js | Upload pipeline logic, API calls, UI updates |
+| js/api.js | Unified fetch wrapper (`apiFetch`), environment-aware URL resolution |
+| js/config.js | Centralized configuration variables for the frontend |
 
 Static file serving: FastAPI mounts `frontend/` at `/` via StaticFiles(html=True).
 API routes (/api/*) are registered before the static mount and take priority.

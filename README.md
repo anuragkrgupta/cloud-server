@@ -24,7 +24,9 @@ Files of any size are supported by automatically chunking, streaming, and reasse
 - **Multi-part reassembly** — Multi-volume files chained into one contiguous download stream.
 
 ### Frontend
-- Vanilla HTML, JavaScript, Tailwind CSS. Served as static files by FastAPI.
+- Decoupled Vanilla HTML, JavaScript, and CSS.
+- Hosted on Vercel with SPA-like routing via `vercel.json`.
+- Uses a unified `api.js` client for environment-aware backend requests and token refresh handling.
 - Dark glassmorphism UI with real-time upload progress bars.
 
 ---

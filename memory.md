@@ -4,6 +4,8 @@
 The Cloud Server project has achieved a stable, highly-performant state with advanced features like parallelized Telegram uploads, QR code authentication, and user-to-user file sharing.
 
 ## Recent Milestones
+- **Frontend Dashboard:** Built full-featured cloud storage dashboard (`dashboard.html`, `dashboard.js`) with responsive file upload progress UI and backend API integrations for parallel uploads/downloads.
+- **Unified API Client:** Added a robust API client (`api.js`) providing centralized fetch wrappers, environment-aware URL resolution, and unified handling of authentication failures (e.g., 401 token expiry).
 - **Parallel File Transfers:** Implemented `DCSenderPool` and parallel streaming architecture (`parallel_transfer.py`), completely bypassing Telegram's single-connection speed limits for both uploads and downloads.
 - **File Sharing & Transfers:** Implemented the ability to generate shareable links (`/share.html`) and asynchronously transfer files between users' Telegram cloud storage channels in the background.
 - **QR Code Authentication:** Replaced standard phone number login with a smooth QR Code login flow for Telegram connection, including automatic private storage channel creation.
