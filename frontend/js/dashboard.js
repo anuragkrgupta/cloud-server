@@ -130,7 +130,8 @@ apiFetch('/api/me')
 });
 
 el('logout-btn').addEventListener('click', function(){
-    apiFetch('/api/logout',{method:'POST'}).finally(function(){ 
+    apiFetch('/api/logout',{method:'POST'}).finally(function(){
+        clearAuthToken();
         location.href='/login.html'; 
     });
 });
@@ -391,6 +392,8 @@ el('upload-form').addEventListener('submit', function(e){
             var url = getApiUrl('/api/upload/stream?filename=' + encodeURIComponent(file.name) + '&filesize=' + vsz);
             xhr.open('POST', url, true);
             xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            var _t = getAuthToken();
+            if (_t) xhr.setRequestHeader('Authorization', 'Bearer ' + _t);
             xhr.withCredentials = true;
             
             var lastLoaded = 0;

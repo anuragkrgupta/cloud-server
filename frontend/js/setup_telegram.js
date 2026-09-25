@@ -316,5 +316,6 @@ btnCancelMismatch.addEventListener('click', () => {
 btnLogout.addEventListener('click', async () => {
     if (pollInterval) clearInterval(pollInterval);
     await apiFetch('/api/logout', { method: 'POST' });
+    clearAuthToken();
     window.location.href = '/login.html';
 });

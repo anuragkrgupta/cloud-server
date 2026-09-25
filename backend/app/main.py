@@ -59,7 +59,8 @@ app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 @app.middleware("http")
 async def csrf_protect(request: Request, call_next):
-    # Enforce custom header for state-changing operations to statelessly mitigate CSRF
+    # Enforce custom header for state-changing operations to statelessly mitigate CSRF.
+    # OPTIONS (CORS preflight) must always pass through untouched.
     if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
         if request.url.path.startswith("/api/"):
             if not request.headers.get("x-requested-with"):

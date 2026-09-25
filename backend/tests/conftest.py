@@ -1,3 +1,9 @@
+"""
+Shared test fixtures and configuration.
+
+Uses an in-memory SQLite database so tests never touch the real Supabase DB.
+Overrides the FastAPI lifespan so the production startup/shutdown hooks are skipped.
+"""
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -37,6 +43,23 @@ async def test_lifespan(app_instance):
     yield
 
 app.router.lifespan_context = test_lifespan
+
+
+# ── Header helpers ──────────────────────────────────────────────────────
+# The CSRF middleware requires X-Requested-With on all state-changing
+# API requests.  These helpers keep every test DRY.
+
+CSRF_HEADER = {"X-Requested-With": "XMLHttpRequest"}
+
+
+def _merge_headers(*dicts):
+    """Merge multiple header dicts, later ones overriding earlier ones."""
+    merged = {}
+    for d in dicts:
+        if d:
+            merged.update(d)
+    return merged
+
 
 @pytest.fixture(scope="module")
 def client():

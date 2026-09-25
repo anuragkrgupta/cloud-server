@@ -53,6 +53,14 @@ form.addEventListener('submit', async (e) => {
     });
 
     if (res.ok) {
+      // Store the access token as a fallback for browsers that block
+      // cross-site cookies (mobile Safari ITP, Chrome third-party cookie phase-out).
+      // The httpOnly cookie is still set and used when available.
+      const loginData = await res.json();
+      if (loginData.access_token) {
+        setAuthToken(loginData.access_token);
+      }
+
       const meRes = await apiFetch('/api/me');
       if (meRes.ok) {
          const user = await meRes.json();
@@ -69,6 +77,8 @@ form.addEventListener('submit', async (e) => {
          } else {
              window.location.href = '/setup_telegram.html';
          }
+      } else {
+        showError('Login succeeded but session could not be verified. Please try again.');
       }
       return;
     }
