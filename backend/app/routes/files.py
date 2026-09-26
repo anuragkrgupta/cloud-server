@@ -156,14 +156,14 @@ from fastapi import Request
 async def upload_volume_stream(
     request: Request,
     filename: str,
-    filesize: int = None,
+    filesize: float = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     if not current_user.telegram_session or not current_user.channel_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
         
-    content_length = filesize or request.headers.get("Content-Length")
+    content_length = int(filesize) if filesize else request.headers.get("Content-Length")
     if not content_length:
         raise HTTPException(400, "Content-Length header or filesize parameter required")
         

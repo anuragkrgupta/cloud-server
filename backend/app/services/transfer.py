@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 async def transfer_file_between_users(source_user_id: int, target_user_id: int, source_file_id: int, message_ids: list[int]):
     """
     Background task to stream a file from source user's Telegram channel to target user's Telegram channel.
+    Transfers each volume/part independently to respect Telegram's per-document 2GB limit.
     """
     db: Session = SessionLocal()
     try:
@@ -32,46 +33,44 @@ async def transfer_file_between_users(source_user_id: int, target_user_id: int, 
         source_client = await get_client_for_session(source_user.telegram_session)
         source_entity = await get_resolved_entity(source_client, source_user.channel_id)
         
-        # 2. Setup Target Client
-        target_client = await get_client_for_session(target_user.telegram_session)
-        target_entity = await get_resolved_entity(target_client, target_user.channel_id)
+        logger.info(f"Starting background transfer of file {source_file.original_name} from user {source_user_id} to {target_user_id}")
         
-        # Create a new FileRecord for target user immediately so they see it (with 0 size initially, or full size but maybe pending status? We'll just do it after transfer finishes to avoid complexity)
-        
-        # We will stream parts one by one.
-        # However, upload_stream_parallel expects an async generator that yields chunks.
-        # We can create an async generator that yields all chunks of all parts sequentially.
-        
-        async def combined_stream():
-            for msg_id in message_ids:
-                message = await source_client.get_messages(source_entity, ids=msg_id)
-                if not message or not message.media:
-                    raise Exception(f"Media not found in source message (ID: {msg_id})")
-                
+        from app.services.telegram_service import upload_stream_to_telegram
+
+        # Transfer each volume/part independently so no single upload exceeds
+        # Telegram's 2GB per-document limit (avoids FILE_PARTS_TOO_MUCH).
+        new_message_ids = []
+        for part_idx, msg_id in enumerate(message_ids):
+            message = await source_client.get_messages(source_entity, ids=msg_id)
+            if not message or not message.media:
+                raise Exception(f"Media not found in source message (ID: {msg_id})")
+
+            part_size = message.document.size
+
+            async def part_stream(src_client, media, size):
                 async for chunk in download_message_parallel(
-                    source_client,
-                    message.media,
-                    message.document.size,
+                    src_client,
+                    media,
+                    size,
                     workers=settings.WORKERS_PER_TRANSFER
                 ):
                     yield chunk
 
-        logger.info(f"Starting background transfer of file {source_file.original_name} from user {source_user_id} to {target_user_id}")
-        
-        # Do the upload to target
-        from app.services.telegram_service import upload_stream_to_telegram
-        msg_id = await upload_stream_to_telegram(
-            target_user.telegram_session,
-            target_user.channel_id,
-            source_file.original_name,
-            source_file.file_size,
-            combined_stream()
-        )
-        
-        if not msg_id:
-            raise Exception("Transfer uploaded 0 messages.")
-            
-        # Success! Now save to DB
+            target_msg_id = await upload_stream_to_telegram(
+                target_user.telegram_session,
+                target_user.channel_id,
+                source_file.original_name,
+                part_size,
+                part_stream(source_client, message.media, part_size)
+            )
+
+            if not target_msg_id:
+                raise Exception(f"Transfer failed for part {part_idx} (source msg {msg_id})")
+
+            new_message_ids.append(target_msg_id)
+            logger.info(f"Transferred part {part_idx + 1}/{len(message_ids)} -> target msg_id={target_msg_id}")
+
+        # All parts transferred — save to DB
         new_file = FileRecord(
             user_id=target_user.id,
             original_name=source_file.original_name,
@@ -84,18 +83,20 @@ async def transfer_file_between_users(source_user_id: int, target_user_id: int, 
         db.commit()
         db.refresh(new_file)
         
-        part_record = FilePartRecord(
-            file_id=new_file.id,
-            part_index=0,
-            telegram_message_id=msg_id,
-            channel_id=target_user.channel_id
-        )
-        db.add(part_record)
+        for idx, target_msg_id in enumerate(new_message_ids):
+            part_record = FilePartRecord(
+                file_id=new_file.id,
+                part_index=idx,
+                telegram_message_id=target_msg_id,
+                channel_id=target_user.channel_id
+            )
+            db.add(part_record)
         
         db.commit()
-        logger.info(f"Successfully transferred file {new_file.id} to user {target_user_id}")
+        logger.info(f"Successfully transferred file {new_file.id} ({len(new_message_ids)} parts) to user {target_user_id}")
         
     except Exception as e:
         logger.error(f"Transfer between users failed: {e}")
     finally:
         db.close()
+

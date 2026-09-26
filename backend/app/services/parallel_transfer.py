@@ -20,10 +20,10 @@ class DCSenderPool:
     """N authenticated MTProtoSender connections to one Telegram DC,
     all sharing the account's auth key via exported authorization."""
 
-    def __init__(self, client: TelegramClient, workers: int = DEFAULT_WORKERS):
+    def __init__(self, client: TelegramClient, workers: int = DEFAULT_WORKERS, dc_id: Optional[int] = None):
         self.client = client
         self.workers = workers
-        self.dc_id = client.session.dc_id
+        self.dc_id = dc_id or client.session.dc_id
         self.senders: list[MTProtoSender] = []
         self._exported_auth = None  # cached so we only export once per pool
 
@@ -142,11 +142,12 @@ async def download_message_parallel(
     part_size = utils.get_appropriated_part_size(file_size) * 1024
     part_count = math.ceil(file_size / part_size)
 
-    pool = DCSenderPool(client, workers)
-    await pool.open()
-
-    # Ensure the location is correctly converted for raw API requests
+    # Resolve the media's actual DC *before* creating the pool, so workers
+    # connect to the correct Data Center (prevents FileMigrateError).
     _dc_id, input_location = utils.get_input_location(location)
+
+    pool = DCSenderPool(client, workers, dc_id=_dc_id)
+    await pool.open()
 
     async def fetch_part(sender_idx: int, part_index: int) -> bytes:
         req = GetFileRequest(input_location, offset=part_index * part_size, limit=part_size)

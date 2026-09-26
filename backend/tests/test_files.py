@@ -86,3 +86,51 @@ def test_files_list_unauthenticated(client):
     client.cookies.clear()
     response = client.get("/api/files")
     assert response.status_code == 401
+
+
+@patch("app.services.telegram_service.upload_stream_to_telegram", new_callable=AsyncMock)
+def test_upload_stream_with_float_filesize(mock_upload, client):
+    """Float filesize (e.g. 2040109465.6) must not cause a 422 Unprocessable Entity."""
+    mock_upload.return_value = 99
+    token = get_auth_token_with_telegram(client)
+
+    content = b"x" * 100
+    response = client.post(
+        "/api/upload/stream?filename=test.bin&filesize=2040109465.6",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Length": str(len(content)),
+            **CSRF_HEADER,
+        },
+        content=content,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["message_id"] == 99
+    mock_upload.assert_called_once()
+    # Verify the file_size arg was passed as int, not float
+    call_kwargs = mock_upload.call_args
+    assert isinstance(call_kwargs.kwargs.get("file_size") or call_kwargs[1].get("file_size", call_kwargs[0][3]), int)
+
+
+@patch("app.services.telegram_service.upload_stream_to_telegram", new_callable=AsyncMock)
+def test_upload_stream_with_integer_filesize(mock_upload, client):
+    """Integer filesize (e.g. 2039480320) must return 200 OK."""
+    mock_upload.return_value = 100
+    token = get_auth_token_with_telegram(client)
+
+    content = b"y" * 50
+    response = client.post(
+        "/api/upload/stream?filename=test.bin&filesize=2039480320",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Length": str(len(content)),
+            **CSRF_HEADER,
+        },
+        content=content,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["message_id"] == 100

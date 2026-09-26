@@ -247,79 +247,32 @@ window.dlFile = function(id) {
     if (btn) btn.disabled = true;
     strip.style.display = 'block';
     bar.style.width     = '0%';
-    spdEl.textContent   = '0 B/s';
-    xfrEl.textContent   = '0 B';
+    spdEl.textContent   = 'Starting…';
+    xfrEl.textContent   = '';
 
-    var received = 0;
-    var samples  = [[performance.now(), 0]];
-    var chunks   = [];
+    // Stream large files directly to disk via native browser download.
+    // Authentication cookies (access_token) are sent automatically on
+    // same-site requests, so no manual header injection is needed.
+    // The backend sets Content-Disposition: attachment so the browser
+    // triggers a Save-As dialog / download bar natively.
+    var downloadUrl = getApiUrl('/api/download/' + id);
 
-    apiFetch('/api/download/'+id)
-    .then(function(res){
-        if (!res.ok) {
-            return res.text().then(function(txt) {
-                var msg = 'HTTP ' + res.status;
-                try {
-                    var d = JSON.parse(txt);
-                    msg = d.detail || msg;
-                } catch(e) {}
-                throw new Error(msg);
-            });
-        }
-        var total  = parseInt(res.headers.get('Content-Length')||'0', 10);
-        var reader = res.body.getReader();
+    // Use a hidden iframe so we don't navigate away from the dashboard.
+    var iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = downloadUrl;
+    document.body.appendChild(iframe);
 
-        function pump() {
-            return reader.read().then(function(r){
-                if (r.done) return;
-                chunks.push(r.value);
-                received += r.value.byteLength;
+    bar.style.width   = '100%';
+    spdEl.textContent = '↓ Download started';
+    xfrEl.textContent = 'Check your browser downloads';
 
-                var now = performance.now();
-                samples.push([now, received]);
-                samples = samples.filter(function(s){ return now-s[0] <= 4000; });
-
-                var speed = 0;
-                if (samples.length >= 2) {
-                    var a = samples[0], b = samples[samples.length-1];
-                    var dt = (b[0]-a[0])/1000;
-                    speed = dt > 0 ? (b[1]-a[1])/dt : 0;
-                }
-                if (total > 0) bar.style.width = Math.min(received/total*100,99).toFixed(1)+'%';
-                spdEl.textContent = formatSpeed(speed);
-                xfrEl.textContent = formatBytes(received);
-                return pump();
-            });
-        }
-        return pump();
-    })
-    .then(function(){
-        var nameEl = el('file-'+id) && el('file-'+id).querySelector('.file-name');
-        var fname  = nameEl ? nameEl.textContent : 'download';
-        var blob   = new Blob(chunks);
-        var url    = URL.createObjectURL(blob);
-        var a      = document.createElement('a');
-        a.href = url; a.download = fname;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        bar.style.width   = '100%';
-        spdEl.textContent = '✓ Done';
-        xfrEl.textContent = formatBytes(received);
-        setTimeout(function(){
-            strip.style.display = 'none';
-            if (btn) btn.disabled = false;
-        }, 3000);
-    })
-    .catch(function(e){
-        spdEl.textContent = '✗ Error';
-        console.error('Download error:', e);
-        if (e.message && e.message.toLowerCase().includes('session expired')) {
-            location.href = '/setup_telegram.html';
-            return;
-        }
+    setTimeout(function(){
+        strip.style.display = 'none';
         if (btn) btn.disabled = false;
-    });
+        // Clean up the iframe after a generous delay
+        try { document.body.removeChild(iframe); } catch(e) {}
+    }, 5000);
 };
 
 // ---- Delete -----------------------------------------------------------
@@ -353,7 +306,7 @@ el('upload-form').addEventListener('submit', function(e){
 
     var CHUNK  = 1.5*1024*1024;        // 1.5 MB per HTTP POST
     var PART   = 512*1024;            // 512 KB Telegram part
-    var MAXVOL = 1.9*1024*1024*1024;  // 1.9 GB volume limit
+    var MAXVOL = 3890*512*1024;       // ~1.90 GB volume limit (exact integer, aligned to 512 KB parts)
     var nvols  = Math.ceil(file.size/MAXVOL) || 1;
     var msgIds = [];
 
@@ -383,7 +336,9 @@ el('upload-form').addEventListener('submit', function(e){
             });
         }
 
-        var vs  = vi*MAXVOL, ve = Math.min(vs+MAXVOL, file.size), vsz = ve-vs;
+        var vs  = Math.floor(vi*MAXVOL);
+        var ve  = Math.min(vs+MAXVOL, file.size);
+        var vsz = Math.floor(ve-vs);
         var volumeSlice = file.slice(vs, ve);
         showMsg('Uploading volume '+(vi+1)+'/'+nvols+'...');
 
