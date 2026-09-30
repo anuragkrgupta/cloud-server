@@ -20,13 +20,21 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-from telethon.errors import SessionExpiredError, AuthKeyUnregisteredError
+from telethon.errors import SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError
+import logging
+logger = logging.getLogger(__name__)
 
 def handle_telegram_error(e: Exception, db: Session, current_user: User):
-    if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError)):
+    logger.exception(f"Telegram operation failed for user {current_user.id}: {e}")
+    if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError)) or "AuthKeyDuplicatedError" in type(e).__name__:
         current_user.telegram_session = None
         db.commit()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram session expired or revoked. Please reconnect your account.")
+        from app.services.telegram_service import _client_cache
+        _client_cache.pop(current_user.telegram_session, None)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Telegram session expired or revoked by Telegram. Please reconnect your account."
+        )
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 class CompleteUploadParams(BaseModel):
@@ -160,6 +168,9 @@ async def upload_volume_stream(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning(f"upload_volume_stream: telegram_session={'SET' if current_user.telegram_session else 'NONE'}, channel_id={current_user.channel_id}")
     if not current_user.telegram_session or not current_user.channel_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
         

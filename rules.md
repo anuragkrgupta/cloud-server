@@ -1,20 +1,64 @@
 # Coding Standards & Project Rules
 
-## Backend (Python/FastAPI)
-1. **Asynchronous Code:** Use `async/await` for all I/O bound operations (database queries, Telegram API calls, file handling).
-2. **Resource Management:** Never use deprecated `@app.on_event`. All database connection pools and long-lived clients (Telethon) MUST be initialized and closed within the application's `lifespan` context manager.
-3. **CORS Configuration:** Maintain strict but functional CORS policies. Allow origins specifically required for production (Vercel domain) and local development. Ensure `allow_credentials=True`.
-4. **Parallelism & Rate Limiting:** Always use `DCSenderPool` for file uploads and downloads. Avoid sequential uploads which trigger Telegram flood waits or slow performance. Ensure `workers` limit is conservative (e.g., 4-8).
-5. **Eager Validation:** Eagerly validate Telegram sessions and entities (like channel resolution) before returning stream generators, to catch authentication errors early.
-6. **Background Tasks:** Long-running operations like file transfers between users should be executed via `asyncio.create_task` (or Celery if scaled further) to prevent blocking HTTP endpoints.
-7. **Environment Variables:** Use `.env` for local development. Never hardcode secrets (database credentials, Telegram API keys, JWT secrets) in the source code.
+This document establishes the mandatory development standards and architectural rules for the Cloud Server project.
 
-## Frontend (JavaScript/HTML/CSS)
-1. **API Interaction:** DO NOT use raw `fetch()`. You MUST use the `apiFetch` function exported from `frontend/js/api.js`. This guarantees correct headers, CORS configurations, and dynamic URL resolution.
-2. **Vanilla JS:** Stick to Vanilla JavaScript (ES6+). Do not introduce frameworks like React or Vue unless explicitly planned and approved.
-3. **Modularity:** Keep JavaScript files focused on specific views or functionalities (e.g., `dashboard.js`, `share.js`).
-4. **Environment Variables:** The API base URL should be managed centrally in `frontend/js/config.js` to easily switch between local development and production environments.
+---
 
-## Deployment
-- **Backend:** Deployments to Render are managed via `render.yaml`. Any infrastructure changes must be reflected in this file.
-- **Frontend:** Deployments to Vercel rely on `vercel.json` for routing rules. Ensure any new static assets or HTML files are correctly handled by these rules.
+## 1. Backend (Python/FastAPI)
+
+1. **Hardware Acceleration Enforcement:**
+   - Always maintain `cryptg>=0.5.0` in `requirements.txt`.
+   - Never disable or remove `ensure_hardware_acceleration()` in `backend/app/main.py`. Pure Python `pyaes` encryption creates severe CPU bottlenecks and drops upload throughput to ~1 MB/s.
+
+2. **Single-Socket MTProto Pipelining Rule:**
+   - **CRITICAL:** NEVER attempt to open multiple concurrent raw TCP connections with the same Telegram session string.
+   - Concurrency must always be achieved via **asynchronous request pipelining over a single connection per DC** using `DCSenderPool` in `parallel_transfer.py`.
+   - Violating this rule triggers Telegram's `AuthKeyDuplicatedError` and permanently revokes user sessions.
+
+3. **Zero Local Disk Footprint:**
+   - File uploads and downloads must stream directly through memory using `request.stream()` and asynchronous chunk generators.
+   - Never write file bytes to local server disk or temporary directories (`/tmp`, scratch, etc.).
+
+4. **Session Error Handling & Channel Preservation:**
+   - When catching Telegram authentication errors (`AuthKeyDuplicatedError`, `SessionExpiredError`, `SessionRevokedError`, etc.) in `files.py`, safely set `telegram_session = None` in the database.
+   - **NEVER** null or delete `channel_id` or `telegram_user_id` on session errors. Preserving these fields ensures users don't lose access to their uploaded files upon re-login.
+
+5. **Token Expiration Settings:**
+   - Keep `ACCESS_TOKEN_EXPIRE_MINUTES=43200` (30 days) in `.env` and `render.yaml` to ensure multi-gigabyte transfers are never aborted mid-flight by token expiry.
+
+6. **Asynchronous Lifespan Management:**
+   - Use `async/await` for all I/O operations (database queries, Telegram MTProto calls, streaming endpoints).
+   - Long-lived clients and pools must be managed within FastAPI's `lifespan` context manager (`main.py`). Never use deprecated `@app.on_event`.
+
+7. **Background Tasks:**
+   - Long-running operations (like inter-user file transfers via `save_shared_file`) must run as background `asyncio` tasks so HTTP requests return immediately.
+
+8. **Strict Environment Secrets:**
+   - Never hardcode credentials, JWT secrets, database connection strings, or Telegram API credentials. Always use `backend/app/config.py` backed by environment variables.
+
+---
+
+## 2. Frontend (JavaScript/HTML/CSS)
+
+1. **Mandatory `apiFetch` Wrapper:**
+   - **NEVER** use raw browser `fetch()`. All backend communications must use `apiFetch` from `frontend/js/api.js`.
+   - `apiFetch` ensures uniform handling of base URLs, Bearer authorization headers, cross-origin cookies (`credentials: 'include'`), and HTTP 401 token expiration.
+
+2. **Vanilla JavaScript Standard:**
+   - Adhere strictly to Vanilla ES6+ JavaScript. Do not introduce React, Vue, Angular, or Node.js/npm dependencies without explicit approval.
+
+3. **Large File Volume Slicing:**
+   - Any upload exceeding ~1.90 GB must be sliced client-side into clean ~1.90 GB volumes (aligned to 3,890 parts of 512 KB = 2,039,480,320 bytes) before streaming to `/api/upload/stream`.
+
+4. **Real-Time User Feedback:**
+   - Provide accurate progress tracking, transfer speed (MB/s), and estimated time remaining (ETA) during uploads and downloads.
+
+---
+
+## 3. Deployment & Infrastructure
+
+1. **Render Deployment:**
+   - Backend configurations are declared in `render.yaml`. Any environment variable additions or system requirement changes must be reflected in `render.yaml`.
+
+2. **Vercel Deployment:**
+   - Frontend routing and static file handling are governed by `vercel.json`. Ensure any new HTML pages or asset routes conform to these rules.

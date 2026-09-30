@@ -1,39 +1,98 @@
-# Testing Strategy
+# Testing & Quality Assurance Strategy
 
-## Overview
-The testing strategy for the Cloud Server project focuses primarily on ensuring the reliability of the backend API, specifically concerning cross-origin resource sharing (CORS), authentication mechanisms, complex asynchronous file operations, parallel streaming to Telegram, and file sharing logic.
+## 1. Overview
 
-## Test Suite Location
-All automated tests are located in the `backend/tests/` directory. Manual load/performance tests reside in `backend/scripts/`.
+The testing strategy for the Cloud Server ensures reliability, performance, and security across the backend API, database layer, cryptographic acceleration subsystem, and asynchronous MTProto streaming pipeline.
 
-## Current Test Coverage
-The test suite covers:
-1.  **CORS Preflight:** Verification that the FastAPI backend correctly handles `OPTIONS` requests from allowed origins with the appropriate `Access-Control-Allow-*` headers.
-2.  **Authentication:** Testing user registration, login, and token validation.
-3.  **File Streaming & Parallel Transfers:** Verifying the logic for streaming files (uploading and downloading) via the Telethon client, ensuring `DCSenderPool` correctly handles chunks without data loss.
-4.  **File Sharing:** Tests ensuring share tokens are correctly generated, validated, and that unauthorized users cannot access non-shared files.
+Key testing priorities include:
+- **CORS & Preflight Handling:** Cross-origin communication between the Vercel frontend and Render backend.
+- **Authentication & Security:** Registration, bcrypt hashing, JWT issuance, 30-day token persistence, and Fernet session encryption.
+- **Hardware Cryptography Verification:** Ensuring native AES-NI acceleration via `cryptg` is loaded on startup.
+- **Parallel MTProto Streaming:** Validating `DCSenderPool` async request pipelining without socket collisions or `AuthKeyDuplicatedError`.
+- **Large Multi-Volume Slicing:** Ensuring files exceeding 2 GB are partitioned, streamed, and downloaded contiguously without byte corruption.
+- **File Sharing & Background Transfers:** Validating token generation, public streaming, and asynchronous channel-to-channel transfers.
 
-## Running the Tests
+---
 
-To run the tests, ensure you are in the backend directory and your virtual environment is activated:
+## 2. Test Suite Organization
+
+```
+backend/
+├── tests/
+│   ├── test_auth.py             # User registration, login, 30-day JWT validation
+│   ├── test_cors.py             # Cross-origin headers and OPTIONS preflights
+│   ├── test_files.py            # Upload, download, deletion, and metadata handling
+│   ├── test_parallel.py         # DCSenderPool pipelining and mock MTProto senders
+│   └── test_sharing.py          # Share tokens, access permissions, background copy
+├── scripts/
+│   ├── manual_parallel_test.py  # Standalone benchmark for MTProto transfer throughput
+│   └── verify_hardware_accel.py # Dedicated check for AES-NI cryptg acceleration
+└── pytest.ini                   # Pytest async configuration
+```
+
+---
+
+## 3. Running Automated Tests
+
+### 3.1 Activating the Virtual Environment & Running Pytest
+
+From the `backend` directory:
 
 ```bash
 cd backend
-source myenv/Scripts/activate  # On Windows
+
+# On Windows:
+.\venv\Scripts\activate
+
+# On Linux / macOS:
+source venv/bin/activate
+
+# Execute all tests verbosely
 pytest -v
 ```
 
-### Manual Parallel Testing
-To verify transfer speeds and chunk integrity outside the standard `pytest` environment:
+### 3.2 Testing Specific Modules
 ```bash
-python scripts/manual_parallel_test.py
+# Run authentication tests
+pytest tests/test_auth.py -v
+
+# Run parallel transfer and DCSenderPool tests
+pytest tests/test_parallel.py -v
+
+# Run CORS preflight tests
+pytest tests/test_cors.py -v
 ```
 
-### Async Testing Note
-The tests utilize `pytest-asyncio` because the FastAPI application is highly asynchronous. Ensure that the event loop scope is correctly configured (usually handled within the tests or `pytest.ini`) to avoid warnings and ensure tests don't interfere with each other's connection pools.
+---
 
-## Adding New Tests
-When implementing new features on the backend:
-1. Create a corresponding test file in `backend/tests/` (e.g., `test_sharing.py` if expanding).
-2. Use `httpx.AsyncClient` for simulating API requests.
-3. Mock external dependencies (like the actual Telegram API or the database if necessary) to ensure tests are fast, deterministic, and don't rely on live external services.
+## 4. Hardware Acceleration & Performance Verification
+
+### 4.1 Verifying `cryptg` AES-NI
+Start the server and observe startup logs, or verify in Python:
+```bash
+python -c "import telethon.crypto.aes as a; print('AES backend:', a.__file__)"
+```
+When `cryptg` is installed and active, the backend output confirms:
+```
+[INFO] telethon.crypto.aes: cryptg detected, it will be used for encryption
+[INFO] root: Hardware acceleration (AES-NI via cryptg) is ACTIVE and verified.
+```
+If pure Python `pyaes` is reported instead, hardware acceleration has failed and must be resolved.
+
+### 4.2 Live Transfer Speed Benchmarking
+To test real transfer speeds and multi-volume integrity on a live server:
+1. Ensure the backend server is running (`uvicorn app.main:app --port 8000`).
+2. Run test transfers against the streaming endpoint:
+```bash
+# Direct stream upload benchmark
+python -u scratch/test_direct_upload.py
+```
+Observed speeds on live broadband should reach ~3.9+ MB/s, validating full bandwidth utilization with minimal CPU overhead.
+
+---
+
+## 5. Async Testing Guidelines
+
+- The test suite uses `pytest-asyncio`. Ensure async test functions are decorated with `@pytest.mark.asyncio`.
+- When simulating HTTP endpoints, use `httpx.AsyncClient` with `transport=ASGITransport(app=app)`.
+- Mock external Telegram RPC calls in automated CI tests so tests execute deterministically without hitting Telegram rate limits.

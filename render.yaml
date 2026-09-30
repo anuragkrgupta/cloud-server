@@ -11,7 +11,7 @@ services:
       - key: JWT_ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: "60"
+        value: "43200"
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: TG_API_ID

@@ -521,7 +521,7 @@ async def upload_stream_to_telegram(
         message = await client.send_file(entity, file=input_file, force_document=True)
         return message.id
     except Exception as e:
-        logger.error(f"Stream upload error: {e}")
+        logger.exception(f"Stream upload error: {e}")
         raise e
 
 

@@ -1,25 +1,62 @@
 # Product Requirements Document (PRD)
 
 ## Project Overview
-The "Cloud Server" is a web-based application that leverages the Telegram API (via Telethon) to provide users with personal cloud storage capabilities. It allows users to register, log in, connect their Telegram accounts via QR code, and upload, download, and share files seamlessly. 
+The "Cloud Server" is a high-performance web cloud storage system that leverages the Telegram API (via Telethon) as an unlimited, cost-free object storage backend. User files are stored as document messages within a dedicated private Telegram channel, while a PostgreSQL (Supabase) database manages structural metadata, user authentication, and file indexing.
 
-## Goals
-- Provide a robust and scalable backend API for file management.
-- Offer a lightweight, responsive, and intuitive frontend interface.
-- Ensure secure user authentication and cross-origin communication.
-- Utilize Telegram's infrastructure for efficient and reliable file storage.
-- Achieve high-speed file transfers using parallel connections.
+---
 
-## Core Features
-1. **User Authentication:** Registration and login system with token-based authentication.
-2. **Telegram Integration:** Users can link their Telegram accounts securely using QR code login. A dedicated private channel (`CloudStorage_{tg_user_id}`) is automatically created for storage.
-3. **File Management:** High-speed parallel upload, download, delete, and list files. Files can be >2GB and are split across messages if necessary.
-4. **File Sharing & Transfer:** Generate shareable links for specific files. Other users can save shared files directly to their own Telegram cloud storage via background transfer tasks.
-5. **Dashboard:** A central hub for users to view and manage their stored files, share files, and view storage space.
+## 1. System Goals & Performance Targets
 
-## Technical Requirements
-- **Frontend:** HTML, CSS, JavaScript (Vanilla). Hosted on Vercel.
-- **Backend:** Python (FastAPI). Hosted on Render.
-- **Database:** PostgreSQL (Supabase) for user and file metadata.
-- **Storage:** Telegram (via Telethon) using multi-connection pools.
-- **Communication:** RESTful APIs with strict CORS configurations for cross-origin frontend-backend interaction.
+- **Zero-Cost Object Storage:** Utilize Telegram's API infrastructure for file storage without incurring commercial cloud storage costs (S3, GCS, Azure).
+- **Maximum Transfer Throughput:** Attain near-line-rate broadband speeds (~4 MB/s+) by leveraging hardware-accelerated AES-NI cryptography (`cryptg`) and asynchronous MTProto request pipelining (`DCSenderPool`).
+- **Zero Local Footprint:** Stream all incoming and outgoing bytes directly through memory without buffering files to local server disk.
+- **Bypass 2 GB File Limits:** Seamlessly support arbitrary file sizes (tested up to 5 GB+) through client-side volume slicing and contiguous server-side reassembly.
+- **Enterprise-Grade Session Stability:** Prevent session invalidations (`AuthKeyDuplicatedError`) and avoid mid-upload 401 token expirations through 30-day JWT persistence.
+
+---
+
+## 2. Core Functional Requirements
+
+### 2.1 User Authentication & Account Linking
+- **Local Account Management:** Email and password registration/login with bcrypt password hashing and 30-day JWT cookies/bearer tokens (`ACCESS_TOKEN_EXPIRE_MINUTES=43200`).
+- **Telegram Account Integration:**
+  - Secure linking via interactive QR code scanning (or phone number fallback with 2FA password support).
+  - Fernet encryption for Telethon `StringSession` strings at rest.
+  - Automatic creation and binding of a private storage channel (`CloudStorage_{tg_user_id}`).
+  - Automatic detection and recovery for revoked Telegram sessions, preserving existing file and channel bindings.
+
+### 2.2 File Management & High-Speed Transfers
+- **Direct Stream Uploads:**
+  - Files <= 1.90 GB stream directly into the user's storage channel via `/api/upload/stream`.
+  - Files > 1.90 GB are partitioned client-side into ~1.90 GB sequential volumes and uploaded as distinct document messages.
+  - Hardware-accelerated AES-IGE encryption via `cryptg` (AES-NI).
+  - Concurrent chunk pipelining over authenticated DC connection (512 KB chunks).
+- **Streaming Downloads:**
+  - Contiguous streaming of multi-part files via `/api/download/{file_id}` without disk caching.
+  - Multi-worker chunk prefetching to saturate download bandwidth.
+- **File Deletion:**
+  - Deletes database records and purges the corresponding document messages from the Telegram storage channel.
+
+### 2.3 Peer-to-Peer File Sharing
+- **Share Link Generation:** Generate unique, secure share tokens for any uploaded file (`/share.html?token=...`).
+- **Direct Download for Recipients:** External visitors can download shared files directly without logging in.
+- **"Save to my Cloud" Import:** Authenticated recipients can clone shared files directly into their own private Telegram storage channel via asynchronous server-side background tasks (`transfer_file_between_users`), transferring true ownership without downloading to their device.
+
+### 2.4 User Interface & Dashboard
+- **Glassmorphism UI:** Modern dark glassmorphic dashboard built in Vanilla JS and Tailwind CSS.
+- **Live Transfer Metrics:** Real-time transfer speed calculation (MB/s), percentage progress bars, and accurate dynamic ETA displays.
+- **Search & Filter:** Instant in-memory search and filtering across the user's file library.
+
+---
+
+## 3. Technical & Non-Functional Requirements
+
+| Layer | Specification |
+|---|---|
+| Frontend | HTML5, Vanilla JavaScript (ES6+), Tailwind CSS (CDN). Hosted on Vercel. |
+| Backend | Python 3.10+, FastAPI, Uvicorn ASGI server. Hosted on Render. |
+| Cryptography | `cryptg` (Native C AES-NI extension for AES-IGE), `cryptography` (Fernet). |
+| Database | PostgreSQL (Supabase) via SQLAlchemy ORM (Transaction Pooler). |
+| MTProto Client | Telethon with `DCSenderPool` request pipelining. |
+| Concurrency | Single-connection pipelining per DC; zero duplicate auth keys. |
+| API Communication | Centralized `apiFetch` wrapper with dynamic base URL resolution and CORS support. |

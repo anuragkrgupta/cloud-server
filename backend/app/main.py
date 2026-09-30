@@ -6,6 +6,8 @@ Run with:
     uvicorn app.main:app --reload
 """
 import os
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -17,8 +19,37 @@ from app.database import Base, engine
 from app.routes import auth_routes, telegram, files, share
 
 
+def ensure_hardware_acceleration():
+    """Verifies that cryptg (AES-NI hardware acceleration) is active.
+    If missing on any device/server, attempts auto-installation and reloads the Telethon cipher engine."""
+    try:
+        import cryptg
+        from telethon.crypto import aes
+        if getattr(aes, "cryptg", None) is not None:
+            logging.info("Hardware acceleration (AES-NI via cryptg) is ACTIVE and verified.")
+            return
+    except ImportError:
+        pass
+
+    logging.warning("Hardware acceleration (cryptg) not detected. Attempting automatic installation...")
+    try:
+        import sys
+        import subprocess
+        import importlib
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "cryptg>=0.5.0"])
+        from telethon.crypto import aes
+        importlib.reload(aes)
+        logging.info("Successfully installed and enabled cryptg hardware acceleration.")
+    except Exception as err:
+        logging.error("Could not automatically install cryptg: %s. Using standard cipher fallback.", err)
+
+ensure_hardware_acceleration()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Verify hardware acceleration on server startup
+    ensure_hardware_acceleration()
     # Startup: Ensure database tables are created if DB is accessible
     try:
         Base.metadata.create_all(bind=engine)

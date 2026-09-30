@@ -10,56 +10,48 @@ from telethon.tl.functions import InvokeWithLayerRequest
 from telethon.tl.functions.auth import ExportAuthorizationRequest, ImportAuthorizationRequest
 from telethon.tl.functions.upload import GetFileRequest, SaveFilePartRequest, SaveBigFilePartRequest
 from telethon.tl.types import InputFile, InputFileBig, TypeInputFile
+from telethon.sessions import StringSession
 
 PART_SIZE = 512 * 1024                 # Telegram-mandated chunk size
 BIG_FILE_THRESHOLD = 10 * 1024 * 1024  # files above this use "big file" upload mode
-DEFAULT_WORKERS = 4                    # start conservative; 4-8 is the usual sweet spot
+DEFAULT_WORKERS = 4                    # 4 parallel DC connections — good balance of speed vs flood-wait risk
+READ_BUFFER = 2 * 1024 * 1024          # 2 MB internal read buffer — reduces async iteration overhead
 
 
 class DCSenderPool:
-    """N authenticated MTProtoSender connections to one Telegram DC,
-    all sharing the account's auth key via exported authorization."""
+    """Pipelines requests over a single connection per DC to avoid AuthKeyDuplicatedError.
+    For the current DC, it reuses the main client. For a cross-DC transfer, it creates 1 new client."""
 
     def __init__(self, client: TelegramClient, workers: int = DEFAULT_WORKERS, dc_id: Optional[int] = None):
         self.client = client
         self.workers = workers
         self.dc_id = dc_id or client.session.dc_id
-        self.senders: list[MTProtoSender] = []
-        self._exported_auth = None  # cached so we only export once per pool
-
-    async def _open_one(self) -> MTProtoSender:
-        dc = await self.client._get_dc(self.dc_id)
-        sender = MTProtoSender(self.client.session.auth_key, loggers=self.client._log)
-        await sender.connect(
-            self.client._connection(
-                dc.ip_address, dc.port, dc.id,
-                loggers=self.client._log, proxy=self.client._proxy,
-            )
-        )
-        
-        import copy
-        from telethon.tl.functions.help import GetConfigRequest
-        init_req = copy.copy(self.client._init_request)
-
-        if self.dc_id != self.client.session.dc_id:
-            if self._exported_auth is None:
-                self._exported_auth = await self.client(ExportAuthorizationRequest(self.dc_id))
-            assert self._exported_auth is not None
-            init_req.query = ImportAuthorizationRequest(
-                id=self._exported_auth.id, bytes=self._exported_auth.bytes
-            )
-        else:
-            init_req.query = GetConfigRequest()
-            
-        await sender.send(InvokeWithLayerRequest(LAYER, init_req))
-        
-        return sender
+        self.senders: list[TelegramClient] = []
+        self._cross_dc_client = None
 
     async def open(self):
-        self.senders = await asyncio.gather(*(self._open_one() for _ in range(self.workers)))
+        is_same_dc = (self.dc_id == self.client.session.dc_id)
+        
+        if is_same_dc:
+            # Safest: reuse the main client for pipelining requests concurrently.
+            self.senders = [self.client] * self.workers
+        else:
+            # Different DC: export auth, create ONE new client, and pipeline over it.
+            auth = await self.client(ExportAuthorizationRequest(self.dc_id))
+            
+            sender = TelegramClient(StringSession(), self.client.api_id, self.client.api_hash)
+            dc = await self.client._get_dc(self.dc_id)
+            sender.session.set_dc(self.dc_id, dc.ip_address, dc.port)
+            
+            await sender.connect()
+            await sender(ImportAuthorizationRequest(id=auth.id, bytes=auth.bytes))
+            
+            self._cross_dc_client = sender
+            self.senders = [sender] * self.workers
 
     async def close(self):
-        await asyncio.gather(*(s.disconnect() for s in self.senders), return_exceptions=True)
+        if self._cross_dc_client:
+            await self._cross_dc_client.disconnect()
 
 
 async def upload_stream_parallel(
@@ -95,7 +87,7 @@ async def upload_stream_parallel(
             if is_big else
             SaveFilePartRequest(file_id, part_index, data)
         )
-        pending[sender_idx] = asyncio.create_task(client._call(pool.senders[sender_idx], req))
+        pending[sender_idx] = asyncio.create_task(pool.senders[sender_idx](req))
 
     try:
         buffer = bytearray()
@@ -116,10 +108,9 @@ async def upload_stream_parallel(
 
         await asyncio.gather(*(t for t in pending.values() if t is not None))
     finally:
-        # Always tear down every sender — a crash or a dropped client
-        # connection mid-upload must not leave sockets dangling, or you
-        # risk exactly the auth-key-ban scenario brain.md already flags
-        # for the main cached client.
+        for t in pending.values():
+            if t is not None and not t.done():
+                t.cancel()
         await pool.close()
 
     if is_big:
@@ -151,7 +142,7 @@ async def download_message_parallel(
 
     async def fetch_part(sender_idx: int, part_index: int) -> bytes:
         req = GetFileRequest(input_location, offset=part_index * part_size, limit=part_size)
-        result = await client._call(pool.senders[sender_idx], req)
+        result = await pool.senders[sender_idx](req)
         return result.bytes
 
     # Fetch `workers` parts at a time, but yield them in strict order so

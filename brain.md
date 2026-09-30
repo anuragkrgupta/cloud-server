@@ -1,6 +1,6 @@
 # brain.md — Developer Reference
 
-Deep-dive technical reference for the Telegram Cloud Storage project. Covers the full architecture, data flows, security model, known gotchas, and areas for future improvement.
+Deep-dive technical reference for the Telegram Cloud Storage project. Covers the full architecture, data flows, cryptographic acceleration, MTProto connection rules, security model, known gotchas, and areas for future improvement.
 
 ---
 
@@ -10,10 +10,10 @@ Deep-dive technical reference for the Telegram Cloud Storage project. Covers the
 2. [Architecture Overview](#2-architecture-overview)
 3. [Database Schema](#3-database-schema)
 4. [Authentication & Security](#4-authentication--security)
-5. [Upload Flow](#5-upload-flow)
-6. [Download Flow](#6-download-flow)
-7. [Telegram Connection Management](#7-telegram-connection-management)
-8. [Frontend Pages & JS](#8-frontend-pages--js)
+5. [Upload Flow (Streaming & Pipelined Parallelism)](#5-upload-flow-streaming--pipelined-parallelism)
+6. [Download Flow (Prefetched Streaming)](#6-download-flow-prefetched-streaming)
+7. [Telegram Connection Management & DCSenderPool](#7-telegram-connection-management--dcsenderpool)
+8. [Frontend Pages & Architecture](#8-frontend-pages--architecture)
 9. [Config & Environment](#9-config--environment)
 10. [Known Gotchas & Bugs](#10-known-gotchas--bugs)
 11. [Areas for Future Improvement](#11-areas-for-future-improvement)
@@ -26,7 +26,7 @@ Deep-dive technical reference for the Telegram Cloud Storage project. Covers the
 cloud server/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI app factory, router registration, static mount
+│   │   ├── main.py              # FastAPI app factory, lifespan hooks, cryptg auto-verification, static mount
 │   │   ├── config.py            # Settings class — reads .env via dotenv
 │   │   ├── database.py          # SQLAlchemy engine, SessionLocal, Base
 │   │   ├── models.py            # ORM models: User, FileRecord, FilePartRecord
@@ -34,24 +34,37 @@ cloud server/
 │   │   ├── auth.py              # JWT, bcrypt, Fernet session encryption
 │   │   ├── routes/
 │   │   │   ├── auth_routes.py   # /api/register /api/login /api/logout /api/me
-│   │   │   ├── files.py         # /api/upload/* /api/files /api/download/* /api/files/*
-│   │   │   └── telegram.py      # /api/telegram/qr-start /qr-status /2fa
+│   │   │   ├── files.py         # /api/upload/* /api/files /api/download/* /api/files/* /api/share/*
+│   │   │   └── telegram.py      # /api/telegram/qr-start /qr-status /2fa /disconnect
 │   │   └── services/
-│   │       └── telegram_service.py  # All Telethon logic: QR login, upload pool, download
+│   │       ├── telegram_service.py  # Telethon core: QR login, channel management, client caching
+│   │       └── parallel_transfer.py # DCSenderPool, pipelined upload/download, hardware crypto
 │   ├── .env                     # Real secrets (gitignored)
-│   ├── requirements.txt
-│   └── venv/
+│   ├── requirements.txt         # Dependencies (includes cryptg>=0.5.0)
+│   ├── render.yaml              # Render deployment blueprint
+│   └── tests/                   # Pytest test suite
 ├── frontend/
 │   ├── index.html               # Thin redirect to /login.html
-│   ├── login.html
-│   ├── register.html
+│   ├── login.html               # User login view
+│   ├── register.html            # User registration view
 │   ├── dashboard.html           # Main file manager UI
-│   ├── setup_telegram.html      # QR code linking flow
+│   ├── setup_telegram.html      # QR code Telegram linking view
+│   ├── share.html               # Public/Shared file download & import view
 │   └── js/
-│       └── dashboard.js         # Upload pipeline, file listing, download trigger
+│       ├── api.js               # Centralized fetch wrapper (apiFetch)
+│       ├── config.js            # Environment-aware base URL config
+│       ├── dashboard.js         # Upload pipeline, multi-volume slicing, UI updates
+│       └── share.js             # Share view logic & background transfer trigger
 ├── .env.example
 ├── README.md
-└── brain.md                     # <- this file
+├── architecture.md
+├── agent.md
+├── brain.md                     # <- this file
+├── decision.md
+├── memory.md
+├── rules.md
+├── PRD.md
+└── testing.md
 ```
 
 ---
@@ -59,284 +72,212 @@ cloud server/
 ## 2. Architecture Overview
 
 ```
-Browser
-  |
-  |  HTTP (cookie auth)
-  v
-FastAPI (Uvicorn)  ---- SQLAlchemy ---> PostgreSQL (Supabase) (cloud_db)
-  |                        |
-  |                   users, files, file_parts
-  |
-  |  Telethon (MTProto)
-  v
-Telegram API
-  +-- Private Channel (one per user, stores actual file bytes as messages)
+Browser (Vercel)
+  │
+  │  HTTP (REST + Streaming /api/upload/stream)
+  ▼
+FastAPI Backend (Render)  ──── SQLAlchemy ───► PostgreSQL (Supabase)
+  │                                                   │
+  │                                              users, files, file_parts
+  │
+  │  Telethon MTProto + cryptg (AES-NI)
+  │  Pipelined requests via DCSenderPool
+  ▼
+Telegram Data Centers (DC 1-5)
+  └── Private Channel (CloudStorage_{tg_user_id} - dumb blob store)
 ```
 
-**Key design decision:** Telegram is used as a dumb blob store. Files are split into <=1.9 GB "volumes", each uploaded as a single Telegram document message. PostgreSQL (Supabase) only stores message IDs + metadata — never file bytes.
+**Key design decisions:**
+1. **Telegram as a Dumb Blob Store:** Telegram stores raw document messages in a private channel created for each user.
+2. **Zero Server Disk Footprint:** All transfers stream through memory without touching local storage or disk.
+3. **Database Stores Only Metadata:** Supabase PostgreSQL stores file metadata, ownership, sharing tokens, and ordered Telegram message IDs.
+4. **Hardware-Accelerated Cryptography:** `cryptg` utilizes CPU AES-NI instructions for native AES-IGE encryption, replacing slow pure Python `pyaes`.
+5. **Single-Socket MTProto Pipelining:** Avoids opening multiple raw TCP sockets with the same `auth_key`, preventing Telegram's `AuthKeyDuplicatedError` while achieving full network throughput.
 
 ---
 
 ## 3. Database Schema
 
-### users
+### `users`
 | Column | Type | Notes |
 |---|---|---|
-| id | INT PK | Auto-increment |
-| name | VARCHAR(50) | Alphanumeric + underscore only |
-| email | VARCHAR(255) UNIQUE | Used as JWT subject (sub claim) |
-| password | VARCHAR(255) | bcrypt hash |
-| telegram_phone | VARCHAR(50) | Nullable; not actively used |
-| telegram_user_id | VARCHAR(50) | Telegram account numeric UID |
+| id | INT PK | Auto-increment primary key |
+| name | VARCHAR(50) | User display name |
+| email | VARCHAR(255) UNIQUE | Login identifier & JWT subject |
+| password | VARCHAR(255) | bcrypt hash via passlib |
+| telegram_phone | VARCHAR(50) | Nullable |
+| telegram_user_id | VARCHAR(50) | Telegram numeric UID |
 | telegram_session | VARCHAR(1000) | Fernet-encrypted Telethon StringSession |
-| channel_id | VARCHAR(50) | Raw Telegram channel ID (no -100 prefix) |
-| created_at | DATETIME | server_default=func.now() |
+| channel_id | VARCHAR(50) | Raw Telegram storage channel ID (without `-100` prefix) |
+| created_at | DATETIME | Timestamp of creation (`server_default=func.now()`) |
 
-Note: `is_telegram_connected` is a Python @property — not a DB column. Returns bool(telegram_session).
+*Note:* `is_telegram_connected` is an ORM `@property` returning `bool(telegram_session)`.
 
-### files
+### `files`
 | Column | Type | Notes |
 |---|---|---|
-| id | INT PK | |
-| user_id | INT FK users.id | |
-| original_name | VARCHAR(255) | Original filename as uploaded |
-| telegram_file_id | VARCHAR(255) | Nullable — currently unused |
-| file_size | BIGINT | Supports >2 GB |
-| mime_type | VARCHAR(100) | Used for Content-Type header on download |
-| uploaded_at | DATETIME | server_default=func.now() |
+| id | INT PK | Auto-increment primary key |
+| user_id | INT FK users.id | Owner reference |
+| original_name | VARCHAR(255) | Sanitized original filename |
+| telegram_file_id | VARCHAR(255) | Nullable |
+| file_size | BIGINT | Total file size in bytes (supports >2 GB) |
+| mime_type | VARCHAR(100) | MIME type for HTTP Content-Type headers |
+| share_token | VARCHAR(64) | Nullable, unique token for public sharing |
+| is_shared | BOOLEAN | Boolean toggle for share access |
+| uploaded_at | DATETIME | Timestamp of upload |
 
-### file_parts
+### `file_parts`
 | Column | Type | Notes |
 |---|---|---|
-| id | INT PK | |
-| file_id | INT FK files.id | CASCADE delete |
-| part_index | INT | 0-based; ordering of volumes |
-| telegram_message_id | INT | Telegram message ID in user's channel |
-| channel_id | VARCHAR(50) | Telegram channel ID where this specific part was uploaded |
+| id | INT PK | Auto-increment primary key |
+| file_id | INT FK files.id | CASCADE delete relationship |
+| part_index | INT | 0-based volume index |
+| telegram_message_id | INT | Telegram message ID inside storage channel |
+| channel_id | VARCHAR(50) | Target channel ID for this part |
 
-A single-volume file (<1.9 GB) has exactly ONE FilePartRecord. Multi-volume files have one record per volume.
+*Design Rule:* Files <= 1.90 GB have exactly 1 `FilePartRecord`. Files > 1.90 GB are split into multiple sequential volumes, each represented by a `FilePartRecord` with an incrementing `part_index`.
 
 ---
 
 ## 4. Authentication & Security
 
-### JWT
-- Algorithm: HS256 with JWT_SECRET_KEY
-- Delivered as httpOnly cookie named `access_token` on login
-- Also accepted as Bearer token in Authorization header (for API clients / curl)
-- Cookie secure=True only when ENVIRONMENT=production
-- `get_current_user` FastAPI dependency protects all routes that need auth
-
-### Password Rules (enforced in UserCreate Pydantic schema)
-- Min 8 characters
-- At least one uppercase letter
-- At least one lowercase letter
-- At least one digit
-- Stored as bcrypt hash via passlib
+### JWT (JSON Web Tokens)
+- **Algorithm:** HS256 with `JWT_SECRET_KEY`.
+- **Extended Token Lifetime:** `ACCESS_TOKEN_EXPIRE_MINUTES=43200` (30 days). Prevents HTTP 401 token expiration errors during lengthy multi-gigabyte uploads or downloads.
+- **Delivery:** Delivered as an `httpOnly` cookie (`access_token`) on login, and accepted via standard `Authorization: Bearer <token>` headers for cross-origin or programmatic clients.
+- **Cookie Security:** `secure=True` automatically enabled when `ENVIRONMENT=production`.
 
 ### Telegram Session Encryption
-- Telethon StringSession strings encrypted with Fernet before DB storage
-- Fernet key derived as: base64url(sha256(JWT_SECRET_KEY))
-- Double-encryption guard: strings already starting with "gAAAAA" are returned as-is
-- Backward compat: strings NOT starting with "gAAAAA" treated as legacy unencrypted sessions (returned as-is from decrypt)
+- Telethon `StringSession` strings are encrypted with Fernet prior to database persistence.
+- The encryption key is derived deterministically: `base64url(sha256(JWT_SECRET_KEY))`.
+- **Idempotency Guard:** Strings already starting with `"gAAAAA"` are recognized as ciphertext and not re-encrypted. Legacy unencrypted strings are supported seamlessly.
 
-### Telegram Session Expiry Handling
-`handle_telegram_error()` in `files.py` catches these Telethon error names:
-  `AuthKeyUnregisteredError`, `SessionExpiredError`, `SessionRevokedError`,
-  `UserDeactivatedError`, `UserDeactivatedBanError`, `UnauthorizedError`
-On match: nulls `telegram_session` in DB, returns HTTP 400.
-**Crucially, it does NOT null `channel_id` or `telegram_user_id`**, ensuring that previously uploaded files are not orphaned if the user simply needs to log back in.
+### Telegram Session Expiry & Revocation Handling
+`handle_telegram_error()` in `backend/app/routes/files.py` intercepts Telethon session exceptions:
+- `AuthKeyDuplicatedError` (triggered if duplicate raw sessions were opened)
+- `AuthKeyUnregisteredError`
+- `SessionExpiredError`
+- `SessionRevokedError`
+- `UserDeactivatedError`, `UserDeactivatedBanError`, `UnauthorizedError`
 
----
-
-## 5. Upload Flow (Streaming & Parallel Multiplexing)
-
-The upload pipeline bypasses Telegram's single-connection speed limits and memory constraints through a highly optimized raw-streaming architecture with TCP backpressure.
-
-```
-Browser -> POST /api/upload/stream (Raw Body) -> Backend -> Telegram
-```
-
-1. **Volume Slicing (Frontend):**
-   If a file > 1.9 GB, the frontend slices it into "volumes" (File/Blob slice) to respect Telegram's 2GB file limit.
-2. **Raw Streaming (Frontend):**
-   The frontend uses `XMLHttpRequest.send(file_volume)` to stream the raw bytes natively over a single HTTP connection. No artificial chunking overhead.
-3. **TCP Backpressure (Backend):**
-   The backend route `/api/upload/stream` reads the `request.stream()` directly. It only drains bytes from the client's TCP buffer as fast as it can push them to Telegram. This natively throttles the browser's upload speed to the true internet speed, making the frontend progress bar 100% accurate.
-4. **Sequential Chunk Upload (Backend):**
-   As the backend streams bytes from the browser, it chops them into 512 KB Telegram-mandated chunks and uploads them sequentially over a dedicated shared connection. Sequential uploading guarantees 100% stability against Telegram's anti-flood socket drops (WinError 10054) and prevents `SecurityError` (wrong session ID) that occurs with overly aggressive parallel RPC multiplexing.
-5. **Finalization:**
-   After the stream finishes, the backend instantly issues a final send command to assemble the parts into a document message in the private channel, returning the `message_id`.
-6. **DB Commit:**
-   Frontend calls `POST /api/upload/complete` with the array of `message_ids` (one per volume) to link them to a single `FileRecord` in PostgreSQL (Supabase).
-
-### Connection Lifecycle & Leak Prevention
-```python
-# telegram_service.py module-level
-_client_cache: dict[str, TelegramClient] = {}
-_client_locks: dict[str, asyncio.Lock] = {}
-```
-To prevent `AuthKeyDuplicatedError` (which occurs when multiple TelegramClient instances attempt to connect simultaneously with the same session string), the backend uses a globally locked `_client_cache`. All uploads and downloads for a specific user share the exact same `TelegramClient` instance.
-
-Furthermore, a global `shutdown` event hook in `main.py` triggers `disconnect_all_clients()` when the uvicorn server reloads or shuts down. This forces a clean disconnect of the MTProto socket, preventing dangling connections that would otherwise cause Telegram to ban the auth key on the next restart.
+**Recovery Action:** It safely nulls `telegram_session` in PostgreSQL so the user can re-link via QR code, but **preserves `channel_id` and `telegram_user_id`** to prevent orphaning uploaded files.
 
 ---
 
-## 6. Download Flow
+## 5. Upload Flow (Streaming & Pipelined Parallelism)
+
+```
+Browser -> POST /api/upload/stream (Raw Body) -> Backend -> Telegram DC
+```
+
+### 1. Volume Slicing (Frontend)
+Telegram imposes a hard 2 GB limit per message. The frontend slices files exceeding ~1.90 GB into sequential volumes (aligned to 3,890 parts of 512 KB = 2,039,480,320 bytes).
+
+### 2. Direct HTTP Streaming
+The browser streams raw bytes via `XMLHttpRequest.send(volumeBlob)` to `/api/upload/stream?filename=...&filesize=...`. No multipart boundary overhead or local disk buffering.
+
+### 3. Hardware AES-NI Acceleration (`cryptg`)
+When sending parts via MTProto, Telethon invokes `cryptg` to encrypt 512 KB chunks using native CPU AES-NI instructions. Cryptographic operations take fractions of a millisecond instead of hundreds of milliseconds per chunk.
+
+### 4. Asynchronous Request Pipelining (`DCSenderPool`)
+- Uploads initialize `upload_stream_parallel` in `parallel_transfer.py`.
+- Instead of opening multiple TCP sockets (which causes session bans), `DCSenderPool` maintains an authenticated connection to the storage DC and pipelines up to `WORKERS_PER_TRANSFER` (default: 4) concurrent asynchronous `SaveBigFilePartRequest` calls over that connection.
+- A producer coroutine reads incoming HTTP stream chunks and places them in an `asyncio.Queue` of 512 KB parts.
+- 4 concurrent consumer workers pull from the queue and send them to Telegram, saturating network bandwidth.
+- Clean cancellation in `finally` blocks ensures no orphaned background tasks.
+
+### 5. Document Message Assembly
+Once all 512 KB parts are uploaded, the backend issues `SendMediaRequest` with an `InputMediaUploadedDocument`, producing a message in the user's private channel.
+
+### 6. Atomic DB Completion
+Frontend issues `POST /api/upload/complete` containing the array of message IDs, creating the `FileRecord` and sequential `FilePartRecord` entries.
+
+---
+
+## 6. Download Flow (Prefetched Streaming)
 
 ```
 GET /api/download/{file_id}
-  |
-  +- Auth check (current_user)
-  +- Query FileRecord by (file_id, user_id)
-  +- Query FilePartRecord[] ordered by part_index
-  +- Build message_ids = [part.telegram_message_id for part in parts]
-  |
-  +- Return StreamingResponse(combined_stream())
-       |
-       combined_stream() async generator:
-         calls download_multiple_messages_stream(session, channel_id, message_ids)
-           |
-           +- Connect one TelegramClient
-           +- For each message_id:
-           |    get_messages(entity, ids=msg_id)
-           |    iter_download(message.media) -> yield chunks
-           +- Disconnect after all parts done
+  │
+  ├─ Authenticate user and fetch FileRecord + FilePartRecord[]
+  ├─ Return StreamingResponse(combined_stream())
+       │
+       └─ For each FilePartRecord:
+            Calls download_file_parallel() via DCSenderPool
+            Prefetches 512KB chunks via worker queue
+            Streams contiguous byte chunks to HTTP client
 ```
 
-Response headers:
-- Content-Disposition: attachment; filename*=UTF-8''<url-encoded-filename>
-- Content-Type: <stored mime_type>
-- NO Content-Length (streaming; browser can't show progress bar)
+- Multi-volume files are transparently chained in memory into a seamless single-file download stream for the browser.
+- High-throughput prefetching guarantees the browser receives data as fast as the Telegram DC can serve it.
 
 ---
 
-## 7. Telegram Connection Management
+## 7. Telegram Connection Management & DCSenderPool
 
-### Channel ID -100 prefix quirk
-Stored as plain int in DB (e.g. 1234567890).
-Telethon internally needs -100 prefix (e.g. -1001234567890).
-get_resolved_entity() handles this:
-```python
-if entity_id > 0:
-    entity_id = int(f"-100{entity_id}")
-```
-If get_input_entity raises "Could not find the input entity" (missing access hash cache),
-get_dialogs(limit=50) is called first to populate the session cache, then retried.
+### Channel Entity Resolution
+- Stored in the database as an integer string (e.g. `4341384088`).
+- Telegram's API requires supergroup/channel IDs to be prefixed with `-100` (e.g. `-1004341384088`).
+- `get_resolved_entity()` automatically converts positive IDs to `-100...` and handles access hash resolution caching.
 
-### QR Login state machine
-```
-POST /api/telegram/qr-start
-  -> new TelegramClient + connect() + qr_login()
-  -> asyncio background task: waits for user to scan
-  -> success: if account mismatch, set status="account_mismatch"
-              else reuse existing channel or create private channel, store in pending_logins[token_id]
+### Single-Socket Pipelining vs. Multi-Socket Sessions
+- **Why Multi-Socket Fails:** In MTProto, session keys (`auth_key`) are bound to connection states. Opening multiple raw TCP connections with the exact same `auth_key` triggers Telegram's security heuristics, resulting in `AuthKeyDuplicatedError` and session revocation.
+- **How DCSenderPool Succeeds:** `DCSenderPool` exports authorization if the media is on a different DC, establishes a dedicated connection for that DC, and pipelines multiple concurrent RPC requests asynchronously over that single connection.
 
-GET /api/telegram/qr-status?token=<uuid>
-  -> read pending_logins[token]
-  -> on success: encrypt session, write to DB, return 200
-  -> on mismatch: return account_mismatch to prompt user
-
-POST /api/telegram/2fa  (triggered if status == "2fa_required")
-  -> client.sign_in(password=...) on still-open client
-  -> same account mismatch / channel creation + DB save flow
-
-POST /api/telegram/override-mismatch
-  -> force creation of a new channel despite account mismatch, clearing the old channel link
-```
-
-IMPORTANT: pending_logins is module-level dict. Does NOT survive server restart.
-Under --reload, any file save restarts the worker and clears all pending logins.
+### QR Login Flow
+1. `POST /api/telegram/qr-start`: Initializes a fresh `TelegramClient`, requests a QR login URL, and registers a background monitoring task in `pending_logins`.
+2. `GET /api/telegram/qr-status`: Frontend polls login status.
+3. On scan: checks if account matches existing ID, verifies/creates the private `CloudStorage_{tg_user_id}` channel, encrypts the session, and saves to PostgreSQL.
+4. `POST /api/telegram/2fa`: Submits 2FA password if user has cloud password enabled.
 
 ---
 
-## 8. Frontend Pages & JS
+## 8. Frontend Pages & Architecture
 
-| File | Role |
-|---|---|
-| index.html | Redirects to /login.html |
-| login.html | Email + password login form |
-| register.html | Registration form |
-| setup_telegram.html | QR code display, status polling, 2FA input |
-| dashboard.html | File list table, upload button, download/delete |
-| share.html | UI for generating and displaying shareable links for files |
-| js/dashboard.js | Upload pipeline logic, API calls, UI updates |
-| js/api.js | Unified fetch wrapper (`apiFetch`), environment-aware URL resolution |
-| js/config.js | Centralized configuration variables for the frontend |
-
-Static file serving: FastAPI mounts `frontend/` at `/` via StaticFiles(html=True).
-API routes (/api/*) are registered before the static mount and take priority.
-No Node.js, no bundler, no build step.
+- **`dashboard.html` / `dashboard.js`:** Drag-and-drop file upload, real-time speed/ETA tracker, multi-volume slicing, file table, download, delete, and share actions.
+- **`setup_telegram.html`:** Dynamic QR code display and status polling with account mismatch recovery dialogs.
+- **`share.html` / `share.js`:** Public/shared file access. Allows non-owners to download the file directly or use "Save to my Cloud" (background server-side copy).
+- **`js/api.js`:** Universal `apiFetch` wrapper providing centralized token management, base URL resolution, and unified error handling.
+- **`js/config.js`:** Dynamic environment configuration (`localhost:8000` vs. production Render URL).
 
 ---
 
 ## 9. Config & Environment
 
-File: backend/app/config.py — class Settings
+File: `backend/app/config.py` (`Settings` class)
 
 | Variable | Default | Description |
 |---|---|---|
-| DATABASE_URL | (empty) | Supabase PostgreSQL connection string (Transaction Pooler recommended) |
-| SUPABASE_URL | (empty) | Project URL for SDK |
-| SUPABASE_KEY | (empty) | Anon/Service key for SDK |
-| JWT_SECRET_KEY | (required) | Also derives the Fernet encryption key |
-| JWT_ALGORITHM | HS256 | JWT signing algorithm |
-| ACCESS_TOKEN_EXPIRE_MINUTES | 60 | Token lifetime |
-| TG_API_ID | 0 | From my.telegram.org |
-| TG_API_HASH | (empty) | From my.telegram.org |
-| ENVIRONMENT | development | Set to "production" for secure cookies |
-
-DATABASE_URL property format:
-  postgresql://postgres:[password]@aws-0-[region].pooler.supabase.com:6543/postgres
-
-SQLAlchemy engine options:
-  pool_pre_ping=True    -- avoids "PostgreSQL (Supabase) server has gone away" on idle connections
-  pool_recycle=3600     -- recycles connections older than 1 hour
+| `DATABASE_URL` | (required) | Supabase PostgreSQL connection string (Transaction Pooler port 6543) |
+| `JWT_SECRET_KEY` | (required) | Secret key for JWT signing and Fernet key derivation |
+| `JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `43200` | Token lifetime (30 days) |
+| `TG_API_ID` | (required) | Telegram API ID from my.telegram.org |
+| `TG_API_HASH` | (required) | Telegram API Hash from my.telegram.org |
+| `WORKERS_PER_TRANSFER` | `4` | Number of concurrent pipelined transfer workers |
+| `ENVIRONMENT` | `development` | Set to `production` for secure cookies |
 
 ---
 
 ## 10. Known Gotchas & Bugs
 
-### _ensure_database_exists()
-database.py used to auto-create cloud_db for MySQL, but since switching to Supabase PostgreSQL, we don't need this step. It's disabled.
+### 1. `cryptg` Absence Degradation
+Without `cryptg`, Telethon silently falls back to pure Python `pyaes`. Upload speeds drop to ~1 MB/s and CPU usage spikes to 100%. `main.py` solves this via automated startup verification (`ensure_hardware_acceleration()`).
 
-### pending_logins does not survive restarts
-Any server restart (including --reload hot-reloads triggered by file saves) clears pending_logins.
-Users mid-QR-scan must start over.
+### 2. Multi-Socket `AuthKeyDuplicatedError`
+Never attempt to open multiple raw TCP connections with the same session string. MTProto concurrency must be achieved via asynchronous request pipelining over a single connection.
 
-### telegram_file_id column is unused
-FileRecord has a telegram_file_id column that is never written to.
-The current design uses telegram_message_id in FilePartRecord instead.
+### 3. Server Reloads Clear `pending_logins`
+The QR login state dictionary is held in memory. Hot-reloads during local development clear pending logins, requiring the user to refresh and re-scan the QR code.
+
+### 4. Database Pre-Ping
+To prevent idle connection timeouts from Supabase's transaction pooler, SQLAlchemy is configured with `pool_pre_ping=True` and `pool_recycle=3600`.
 
 ---
 
 ## 11. Areas for Future Improvement
 
-### Graceful connection recovery
-If the backend crashes or reloads, ongoing stream uploads will fail.
-While the client is shared, adding volume-level resume logic could allow the frontend to retry the specific volume instead of the entire file.
-
-### Content-Length on downloads
-```python
-headers["Content-Length"] = str(file_record.file_size)
-```
-Enables native browser download progress bars. file_size is already stored.
-
-### Persist QR login state across restarts
-Move pending_logins to Redis or a temporary DB table.
-Critical for production where restarts must not invalidate ongoing logins.
-
-### Volume-level retry on stream failure
-If a streaming upload fails mid-transfer, the frontend currently has to restart the entire volume.
-Implementing byte-range resume support would allow continuing the upload exactly where it dropped.
-
-### Rate limiting on auth endpoints
-/api/register and /api/login have no throttling.
-Add slowapi (FastAPI rate limiter) to prevent brute-force attacks.
-
-### JWT refresh / sliding expiry
-No token refresh mechanism exists. When the token expires, the user is silently logged out.
-Add a refresh endpoint or sliding expiry window.
-
-### Remove unused telegram_file_id column
-Either populate it or remove it from the schema to avoid confusion.
+1. **Volume-Level Upload Resume:** If an upload fails mid-transfer, allow resuming the specific 512KB chunk or volume rather than restarting the entire file.
+2. **Native Download Progress:** Include `Content-Length: <file_size>` in `StreamingResponse` so browsers display an estimated completion time.
+3. **Persistent QR State:** Move `pending_logins` to a Redis store or database table to survive server restarts.
+4. **Endpoint Rate Limiting:** Add slowapi rate limiting to `/api/register` and `/api/login`.

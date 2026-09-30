@@ -1,30 +1,57 @@
 # UI/UX Design & Frontend Structure
 
-## Design Philosophy
-- **Minimalist & Clean:** The UI should focus on core functionalities—uploading, viewing, sharing, and managing files without unnecessary clutter.
-- **Responsive:** The layout must adapt seamlessly across desktop, tablet, and mobile devices.
-- **Feedback-Driven:** Provide clear visual feedback for user actions (e.g., upload progress bars, QR code scanning instructions, share link generation).
+## 1. Design Philosophy
 
-## Frontend Structure
-The frontend relies on Vanilla JavaScript, HTML, and CSS, avoiding heavy frameworks to keep the payload light and execution fast.
+- **Dark Glassmorphism Aesthetic:** A modern, sleek dark interface with glassmorphic cards, subtle borders, blurred backdrop filters, and vibrant neon accents (emerald/indigo) providing a premium cloud storage experience.
+- **Minimalist & Clean:** The UI prioritizes core operations—uploading, streaming downloads, searching, sharing, and storage monitoring—without visual clutter.
+- **Responsive Across Devices:** Fluid CSS grid and flex layouts that adapt gracefully across mobile smartphones, tablets, and wide desktop displays.
+- **Accurate Real-Time Feedback:** Upload and download operations provide live speedometers (MB/s), dynamic time-to-completion (ETA) estimates, and byte-accurate progress bars driven by direct TCP stream backpressure.
+
+---
+
+## 2. Frontend Structure & Architecture
+
+The frontend is entirely decoupled from the backend and is built with **Vanilla JavaScript (ES6+), HTML5, and Tailwind CSS**. There are zero Node.js build dependencies, bundling steps, or heavy UI frameworks.
 
 ### Directory Layout
-- `/frontend`
-  - `/css`: Stylesheets (global styles, dashboard specific styles).
-  - `/js`: Logic and interactivity.
-    - `api.js`: Centralized fetch wrapper (`apiFetch`).
-    - `config.js`: Environment variables (API Base URL).
-    - `dashboard.js`, `login.js`, `register.js`, `setup_telegram.js`, `share.js`: Page-specific logic.
-  - `*.html`: View templates.
+```
+/frontend
+  ├── index.html               # Entry point; redirects to /login.html or /dashboard.html
+  ├── login.html               # User sign-in interface
+  ├── register.html            # User account registration interface
+  ├── setup_telegram.html      # QR-code Telegram linking modal & 2FA prompt
+  ├── dashboard.html           # Main file manager, upload zone, search, & file table
+  ├── share.html               # Public share link viewer & "Save to my Cloud" import
+  ├── css/                     # Custom stylesheet overrides (glassmorphism, scrollbars)
+  └── js/
+      ├── api.js               # Universal fetch wrapper (apiFetch) with auth handling
+      ├── config.js            # Environment-aware backend API base URL resolution
+      ├── dashboard.js         # Upload pipeline, multi-volume slicing, UI rendering
+      └── share.js             # Share link validation, direct download, and copy logic
+```
 
-### Styling Guidelines
-- **CSS Variables:** Use CSS variables for consistent theming (colors, typography, spacing).
-- **Flexbox/Grid:** Utilize modern CSS layout modules for structuring components.
-- **Modularity:** Keep CSS files focused on specific components or pages where possible.
+---
 
-### Interaction Patterns
-- **API Calls:** All external data fetching must go through `apiFetch`.
-- **Telegram Authentication (QR Login):** The `setup_telegram.js` periodically polls the backend to check if the user has successfully scanned the QR code via their Telegram app, offering a seamless login experience.
-- **File Sharing:** Generates unique shareable URLs. Visiting a shared URL triggers `share.js` which fetches file metadata and offers a "Save to my Cloud" feature.
-- **State Management:** Simple state is managed via `localStorage` (e.g., auth tokens). More complex state is derived directly from the DOM or encapsulated within module-level variables in specific JS files.
-- **Routing:** Navigation is handled via standard HTML links, relying on `vercel.json` to ensure correct file serving in the production environment.
+## 3. Key Interaction & UI Patterns
+
+### 3.1 Upload Zone & Real-Time Metrics
+- **Drag-and-Drop Zone:** Prominent drop target with dashed borders and hover states.
+- **Volume Chunking Progress:** For files exceeding ~1.90 GB, the UI informs the user of multi-volume slicing and displays contiguous progress across all volumes.
+- **Speed & ETA Engine:** Calculates rolling transfer speed in MB/s and estimated time remaining based on real TCP backpressure from `/api/upload/stream`.
+
+### 3.2 Telegram QR Code Authentication
+- Displays high-contrast QR codes generated directly from Telegram's MTProto login token.
+- Background polling via `GET /api/telegram/qr-status` transitions automatically to 2FA password prompts if cloud passwords are enabled, or directly to the dashboard upon successful connection.
+- Graceful modal notifications if an account mismatch occurs, giving the user control to override or retry.
+
+### 3.3 Public File Sharing Interface (`share.html`)
+- Clean, focused card displaying file metadata (name, human-readable size, upload date).
+- Provides two clear actions:
+  1. **Direct Download:** Streams the file directly from Telegram through the backend to the recipient's browser.
+  2. **Save to my Cloud:** For logged-in users, initiates an instant server-to-server background copy to the user's private channel without local bandwidth consumption.
+
+### 3.4 API Communication Standard (`apiFetch`)
+- Every HTTP request originates from `frontend/js/api.js`.
+- Automatically attaches `Authorization: Bearer <token>` when tokens are present in `localStorage`.
+- Ensures `credentials: 'include'` for secure cookie support.
+- Centralizes 401 Unauthorized interceptors, gracefully redirecting expired sessions to `login.html`.
