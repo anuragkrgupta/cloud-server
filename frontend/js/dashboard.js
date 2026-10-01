@@ -257,11 +257,18 @@ window.dlFile = function(id) {
     // triggers a Save-As dialog / download bar natively.
     var downloadUrl = getApiUrl('/api/download/' + id);
 
-    // Use a hidden iframe so we don't navigate away from the dashboard.
-    var iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = downloadUrl;
-    document.body.appendChild(iframe);
+    // Use a temporary <a> link instead of a hidden iframe.
+    // Mobile browsers block downloads from iframes because they don't
+    // consider them user-gesture-initiated. A programmatic click on an
+    // <a> tag within the same call stack as the user's tap is treated
+    // as a trusted gesture and works on both desktop and mobile.
+    var a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = '';          // hint to browser: treat as download
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 
     bar.style.width   = '100%';
     spdEl.textContent = '↓ Download started';
@@ -270,8 +277,6 @@ window.dlFile = function(id) {
     setTimeout(function(){
         strip.style.display = 'none';
         if (btn) btn.disabled = false;
-        // Clean up the iframe after a generous delay
-        try { document.body.removeChild(iframe); } catch(e) {}
     }, 5000);
 };
 
