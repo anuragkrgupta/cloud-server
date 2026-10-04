@@ -16,6 +16,7 @@ backend/myenv/
 *.env
 backend/.env
 secret*.txt
+.env.example
 
 # SQLite & Databases
 *.db
