@@ -77,10 +77,17 @@ def decode_access_token(token: str) -> dict:
 # Extracting the token from a request (cookie first, then Authorization header)
 # --------------------------------------------------------------------------
 def _extract_token(request: Request) -> Optional[str]:
+    # Check query parameters (for direct file downloads to bypass ITP)
+    token = request.query_params.get("token")
+    if token:
+        return token
+
+    # Check cookies
     token = request.cookies.get(COOKIE_NAME)
     if token:
         return token
 
+    # Check Authorization header
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.lower().startswith("bearer "):
         return auth_header.split(" ", 1)[1]

@@ -27,10 +27,11 @@ logger = logging.getLogger(__name__)
 def handle_telegram_error(e: Exception, db: Session, current_user: User):
     logger.exception(f"Telegram operation failed for user {current_user.id}: {e}")
     if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError)) or "AuthKeyDuplicatedError" in type(e).__name__:
+        old_session = current_user.telegram_session
         current_user.telegram_session = None
         db.commit()
         from app.services.telegram_service import _client_cache
-        _client_cache.pop(current_user.telegram_session, None)
+        _client_cache.pop(old_session, None)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="Telegram session expired or revoked by Telegram. Please reconnect your account."
@@ -142,20 +143,29 @@ async def delete_file(
     if not file_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         
-    try:
-        for part in file_record.parts:
+    errors = []
+    for part in file_record.parts:
+        try:
             channel_id = part.channel_id or current_user.channel_id
             await delete_file_from_telegram(
                 session_string=current_user.telegram_session,
                 channel_id=channel_id,
                 message_id=part.telegram_message_id
             )
+        except Exception as e:
+            errors.append(e)
+            
+    db.delete(file_record)
+    db.commit()
+    
+    if errors:
+        # Check if any error is a session error and handle it
+        for e in errors:
+            if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError)) or "AuthKeyDuplicatedError" in type(e).__name__:
+                handle_telegram_error(e, db, current_user)
+        return Message(message=f"File deleted with {len(errors)} Telegram error(s). DB cleaned up.")
         
-        db.delete(file_record)
-        db.commit()
-        return Message(message="File deleted successfully.")
-    except Exception as e:
-        handle_telegram_error(e, db, current_user)
+    return Message(message="File deleted successfully.")
 
 
 from fastapi import Request

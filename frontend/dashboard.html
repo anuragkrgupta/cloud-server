@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Cloud Storage</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -178,12 +178,14 @@
             </ul>
         </div>
 
-        <div id="loading-screen" class="absolute inset-0 flex items-center justify-center bg-slate-900 z-50">
+    </div>
+
+    <div id="loading-screen" class="absolute inset-0 flex items-center justify-center bg-slate-900 z-50">
             <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
         </div>
 
         <!-- Toast Notification Container -->
-        <div id="toast-container" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 flex flex-col items-center space-y-2 z-50"></div>
+        <div id="toast-container" class="fixed top-5 left-1/2 transform -translate-x-1/2 flex flex-col items-center space-y-2 z-50"></div>
 
         <script>
             // Remove loading screen when JS loads and checks auth

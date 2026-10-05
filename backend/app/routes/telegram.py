@@ -127,7 +127,13 @@ async def api_override_mismatch(req: TelegramMismatchOverrideRequest, db: Sessio
 
 @router.post("/api/telegram/disconnect")
 async def api_telegram_disconnect(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.services.telegram_service import _client_cache
+    old_session = current_user.telegram_session
     current_user.telegram_session = None
     current_user.telegram_user_id = None
     db.commit()
+    if old_session and old_session in _client_cache:
+        client = _client_cache.pop(old_session)
+        if client.is_connected():
+            await client.disconnect()
     return {"status": "success", "message": "Telegram disconnected"}

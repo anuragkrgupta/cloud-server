@@ -28,6 +28,15 @@ document.addEventListener('DOMContentLoaded', function() {
         el('filesize').textContent = formatBytes(fileInfo.file_size);
         el('ownername').textContent = fileInfo.owner_name;
 
+        el('download-btn').onclick = function() {
+            var a = document.createElement('a');
+            a.href = getApiUrl('/api/shared/' + token + '/download');
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
+
         checkAuth(token);
     })
     .catch(function(e) {

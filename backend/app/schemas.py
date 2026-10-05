@@ -12,6 +12,11 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
@@ -41,6 +46,11 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
 
 
 class UserOut(BaseModel):

@@ -60,6 +60,41 @@ def get_shared_file_info(token: str, db: Session = Depends(get_db)):
         "owner_name": file_record.user.name
     }
 
+from fastapi.responses import StreamingResponse
+import urllib.parse
+from app.services.telegram_service import download_multiple_messages_stream
+
+@router.get("/api/shared/{token}/download")
+async def download_shared_file(token: str, db: Session = Depends(get_db)):
+    file_record = db.query(FileRecord).filter(FileRecord.share_token == token, FileRecord.is_shared == True).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="Shared file not found or link has expired.")
+        
+    owner = file_record.user
+    if not owner.telegram_session or not owner.channel_id:
+        raise HTTPException(status_code=400, detail="Owner's Telegram account is not connected.")
+        
+    try:
+        parts = sorted(file_record.parts, key=lambda p: p.part_index)
+        message_ids = [part.telegram_message_id for part in parts]
+        channel_id = parts[0].channel_id if (len(parts) > 0 and parts[0].channel_id) else owner.channel_id
+        
+        stream = await download_multiple_messages_stream(
+            session_string=owner.telegram_session,
+            channel_id=channel_id,
+            message_ids=message_ids
+        )
+        
+        safe_filename = urllib.parse.quote(file_record.original_name)
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
+            "Content-Length": str(file_record.file_size),
+        }
+        
+        return StreamingResponse(stream, media_type=file_record.mime_type, headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stream file: {str(e)}")
+
 @router.post("/api/shared/{token}/save")
 async def save_shared_file(
     token: str, 

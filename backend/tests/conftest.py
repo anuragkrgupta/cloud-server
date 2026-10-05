@@ -61,12 +61,14 @@ def _merge_headers(*dicts):
     return merged
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def client():
-    # We clear the DB tables and recreate them per module
+    # We clear the DB tables and recreate them per function to ensure total isolation
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as c:
+        # Prevent cookie jar bleeding across tests
+        c.cookies.clear()
         yield c
 
 @pytest.fixture(scope="function")
@@ -76,8 +78,8 @@ def session():
     try:
         yield db
     finally:
-        db.close()
         # Clean up tables after each function if isolation is needed
         for table in reversed(Base.metadata.sorted_tables):
             db.execute(table.delete())
         db.commit()
+        db.close()

@@ -182,19 +182,19 @@ function loadFiles() {
               +   '</div>'
               +   '<div class="flex gap-2 shrink-0">'
               +     '<button onclick="shareFile('+f.id+')"'
-              +       ' class="p-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded-lg border border-emerald-500/30" title="Share">'
+              +       ' class="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 rounded-lg border border-emerald-500/30" title="Share">'
               +       '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
               +         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />'
               +       '</svg>'
               +     '</button>'
               +     '<button id="dl-btn-'+f.id+'" onclick="dlFile('+f.id+')"'
-              +       ' class="p-2 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded-lg border border-indigo-500/30" title="Download">'
+              +       ' class="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded-lg border border-indigo-500/30" title="Download">'
               +       '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
               +         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>'
               +       '</svg>'
               +     '</button>'
               +     '<button onclick="delFile('+f.id+')"'
-              +       ' class="p-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg border border-red-500/30" title="Delete">'
+              +       ' class="p-3 min-w-[44px] min-h-[44px] flex items-center justify-center bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg border border-red-500/30" title="Delete">'
               +       '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
               +         '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>'
               +       '</svg>'
@@ -246,35 +246,23 @@ window.dlFile = function(id) {
 
     if (btn) btn.disabled = true;
     strip.style.display = 'block';
-    bar.style.width     = '0%';
-    spdEl.textContent   = 'Starting…';
-    xfrEl.textContent   = '';
+    bar.style.width     = '100%';
+    spdEl.textContent   = '↓ Download started';
+    xfrEl.textContent   = 'Check your browser downloads';
 
-    // Stream large files directly to disk via native browser download.
-    // Authentication cookies (access_token) are sent automatically on
-    // same-site requests, so no manual header injection is needed.
-    // The backend sets Content-Disposition: attachment so the browser
-    // triggers a Save-As dialog / download bar natively.
-    var downloadUrl = getApiUrl('/api/download/' + id);
+    var token = getAuthToken();
+    var downloadUrl = getApiUrl('/api/download/' + id) + (token ? '?token=' + encodeURIComponent(token) : '');
 
-    // Use a temporary <a> link instead of a hidden iframe.
-    // Mobile browsers block downloads from iframes because they don't
-    // consider them user-gesture-initiated. A programmatic click on an
-    // <a> tag within the same call stack as the user's tap is treated
-    // as a trusted gesture and works on both desktop and mobile.
     var a = document.createElement('a');
     a.href = downloadUrl;
-    a.download = '';          // hint to browser: treat as download
+    a.download = ''; // Let browser use Content-Disposition header
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
 
-    bar.style.width   = '100%';
-    spdEl.textContent = '↓ Download started';
-    xfrEl.textContent = 'Check your browser downloads';
-
+    // Prevent immediate DOM removal/revoke which breaks iOS Safari downloads
     setTimeout(function(){
+        document.body.removeChild(a);
         strip.style.display = 'none';
         if (btn) btn.disabled = false;
     }, 5000);

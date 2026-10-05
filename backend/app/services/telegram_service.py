@@ -47,20 +47,8 @@ async def disconnect_all_clients():
     _client_cache.clear()
 
 # ---------------------------------------------------------------------------
-# Persistent upload-client pool
-# Keyed by file_id (int). Entries: {"client": TelegramClient, "lock": asyncio.Lock}
-# Created on the first chunk, torn down inside finalize_telegram_upload.
+# Telegram Login Helpers
 # ---------------------------------------------------------------------------
-_upload_clients = {}
-
-async def _get_upload_client(file_id: int, session_string: str) -> TelegramClient:
-    if file_id not in _upload_clients:
-        client = await get_client_for_session(session_string)
-        _upload_clients[file_id] = {
-            "client": client,
-            "lock": asyncio.Lock()
-        }
-    return _upload_clients[file_id]["client"]
 
 async def _finalize_login(
     token_id: str, 
@@ -97,6 +85,8 @@ async def _finalize_login(
             channel_id = str(channel.id)
         except Exception as e:
             logger.error(f"Failed to create storage channel: {e}")
+            await client.disconnect()
+            return {"status": "failed", "error": f"Could not create storage channel: {e}"}
     else:
         try:
             await get_resolved_entity(client, channel_id)
@@ -112,6 +102,20 @@ async def _finalize_login(
         "channel_id": channel_id,
         "tg_user_id": tg_user_id
     }
+
+import time
+
+async def cleanup_stale_logins(max_age_seconds=300):
+    now = time.time()
+    for tid in list(pending_logins.keys()):
+        if now - pending_logins[tid].get("created_at", now) > max_age_seconds:
+            info = pending_logins.pop(tid, {})
+            client = info.get("client")
+            if client and hasattr(client, 'is_connected') and client.is_connected():
+                await client.disconnect()
+            task = info.get("task")
+            if task and not task.done():
+                task.cancel()
 
 async def start_qr_login(user_channel_id: str = None, user_tg_user_id: str = None) -> tuple[str, str]:
     """
@@ -151,9 +155,13 @@ async def start_qr_login(user_channel_id: str = None, user_tg_user_id: str = Non
     # Start listening in background
     task = asyncio.create_task(wait_for_login(token_id, client, qr_login_obj, user_channel_id, user_tg_user_id))
     
+    await cleanup_stale_logins()
+    
     pending_logins[token_id] = {
         "status": "pending",
-        "task": task
+        "task": task,
+        "created_at": time.time(),
+        "client": client
     }
     
     return token_id, qr_login_obj.url
@@ -197,9 +205,12 @@ async def start_phone_login(phone_number: str, user_channel_id: str = None, user
     try:
         sent_code = await client.send_code_request(phone_number)
         
+        await cleanup_stale_logins()
+        
         pending_logins[token_id] = {
             "status": "waiting_for_code",
             "client": client,
+            "created_at": time.time(),
             "phone_number": phone_number,
             "phone_code_hash": sent_code.phone_code_hash,
             "user_channel_id": user_channel_id,
@@ -448,49 +459,7 @@ async def delete_file_from_telegram(session_string: str, channel_id: str, messag
         logger.error(f"Delete error: {e}")
         raise e
 
-from telethon.tl.functions.upload import SaveBigFilePartRequest, SaveFilePartRequest
-from telethon.tl.types import InputFileBig, InputFile
-
-
-
-async def upload_chunk_to_telegram(
-    session_string: str,
-    file_id: int,
-    start_part_index: int,
-    total_parts: int,
-    chunk_data: bytes,
-    is_big: bool
-):
-    """
-    Sends one frontend chunk (e.g. 5 MB) to Telegram as sequential 512 KB parts,
-    reusing a single persistent connection for the lifetime of the upload.
-    Sequential sending avoids Telegram flood-wait caused by parallel RPC calls.
-    """
-    PART_SIZE = 524288  # 512 KB — Telegram's required part size
-
-    client = await _get_upload_client(file_id, session_string)
-    lock = _upload_clients[file_id]["lock"]
-
-    async with lock:
-        for i in range(0, len(chunk_data), PART_SIZE):
-            part_data = chunk_data[i : i + PART_SIZE]
-            part_index = start_part_index + (i // PART_SIZE)
-
-            if is_big:
-                req = SaveBigFilePartRequest(
-                    file_id=file_id,
-                    file_part=part_index,
-                    file_total_parts=total_parts,
-                    bytes=part_data,
-                )
-            else:
-                req = SaveFilePartRequest(
-                    file_id=file_id,
-                    file_part=part_index,
-                    bytes=part_data,
-                )
-
-            await client(req)
+# Upload client pool was removed because upload_stream_parallel handles connections now.
 
 
 async def upload_stream_to_telegram(
@@ -500,11 +469,6 @@ async def upload_stream_to_telegram(
     file_size: int,
     stream: AsyncGenerator[bytes, None]
 ) -> int:
-    PART_SIZE = 524288
-    total_parts = math.ceil(file_size / PART_SIZE)
-    is_big = file_size > 10 * 1024 * 1024
-    file_id = random.randint(1, 2**63 - 1)
-    
     client = await get_client_for_session(session_string)
     
     try:

@@ -3,11 +3,7 @@
 // ============================================================
 
 function getApiUrl(path) {
-    // Auto-detect environment:
-    var hostname = window.location.hostname;
-    var isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '';
-    var base = isLocal ? 'http://127.0.0.1:8000' : 'https://cloud-server-eazn.onrender.com';
-
+    var base = window.API_BASE_URL || '';
     base = base.replace(/\/+$/, '');
     if (!path.startsWith('/')) {
         path = '/' + path;
