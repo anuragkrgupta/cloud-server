@@ -1,4 +1,4 @@
-```python
+
 """
 SQLAlchemy engine, session factory, and declarative base for PostgreSQL.
 """
@@ -77,4 +77,3 @@ def get_db():
         yield db
     finally:
         db.close()
-```

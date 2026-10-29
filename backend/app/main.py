@@ -45,8 +45,19 @@ async def lifespan(app: FastAPI):
     # Verify hardware acceleration on server startup
     ensure_hardware_acceleration()
     # Verify the database before attempting table creation.
-check_database_connection()
-Base.metadata.create_all(bind=engine)
+    try:
+        check_database_connection()
+        Base.metadata.create_all(bind=engine)
+        logging.info("Database tables verified/created successfully.")
+    except Exception:
+        logging.exception(
+            "Database initialisation failed during startup. "
+            "Verify DATABASE_URL, credentials, SSL, and network access."
+        )
+        raise
+
+    yield
+
     # Shutdown: Disconnect active Telegram clients cleanly
     try:
         from app.services.telegram_service import disconnect_all_clients

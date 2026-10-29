@@ -5,6 +5,7 @@ All values are read from environment variables (loaded from a .env file in
 development). Never commit a real .env file - only .env.example is tracked.
 """
 import os
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,9 +40,10 @@ class Settings:
                 url = url.replace("postgres://", "postgresql://", 1)
             return url
 
-        pwd = f":{self.DB_PASSWORD}" if self.DB_PASSWORD else ""
+        user = quote_plus(self.DB_USER)
+        pwd = f":{quote_plus(self.DB_PASSWORD)}" if self.DB_PASSWORD else ""
         return (
-            f"postgresql://{self.DB_USER}{pwd}"
+            f"postgresql://{user}{pwd}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
 
