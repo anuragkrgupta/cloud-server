@@ -10,7 +10,10 @@ from typing import Optional
 from app.services.transfer import transfer_file_between_users
 import asyncio
 
+import logging
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class ShareResponse(BaseModel):
     share_token: str
@@ -25,8 +28,16 @@ def share_file(file_id: int, db: Session = Depends(get_db), current_user: User =
     if not file_record.share_token:
         file_record.share_token = str(uuid.uuid4())
         file_record.is_shared = True
-        db.commit()
-        db.refresh(file_record)
+        try:
+            db.commit()
+            db.refresh(file_record)
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to commit share token for file %s", file_id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate share link. Please try again.",
+            )
         
     return {"share_token": file_record.share_token, "url": f"/share.html?token={file_record.share_token}"}
 
@@ -38,7 +49,15 @@ def unshare_file(file_id: int, db: Session = Depends(get_db), current_user: User
         
     file_record.share_token = None
     file_record.is_shared = False
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to unshare file %s", file_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to unshare file. Please try again.",
+        )
     
     return {"message": "File is no longer shared."}
 
@@ -92,8 +111,14 @@ async def download_shared_file(token: str, db: Session = Depends(get_db)):
         }
         
         return StreamingResponse(stream, media_type=file_record.mime_type, headers=headers)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to stream file: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to stream shared file (token=%s)", token)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to stream file. Please try again.",
+        )
 
 @router.post("/api/shared/{token}/save")
 async def save_shared_file(
@@ -120,7 +145,10 @@ async def save_shared_file(
         raise HTTPException(status_code=400, detail="The owner's Telegram account is currently disconnected. Cannot transfer file.")
         
     # Get message ids of the source file
-    message_ids = [part.telegram_message_id for part in sorted(source_file.parts, key=lambda p: p.part_index)]
+    parts = sorted(source_file.parts, key=lambda p: p.part_index)
+    if not parts:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Shared file has no data parts.")
+    message_ids = [part.telegram_message_id for part in parts]
     
     asyncio.create_task(
         transfer_file_between_users(

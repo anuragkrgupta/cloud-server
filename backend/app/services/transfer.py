@@ -95,8 +95,12 @@ async def transfer_file_between_users(source_user_id: int, target_user_id: int, 
         db.commit()
         logger.info(f"Successfully transferred file {new_file.id} ({len(new_message_ids)} parts) to user {target_user_id}")
         
-    except Exception as e:
-        logger.error(f"Transfer between users failed: {e}")
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Background transfer failed: file=%s, source_user=%s, target_user=%s",
+            source_file_id, source_user_id, target_user_id,
+        )
     finally:
         db.close()
 

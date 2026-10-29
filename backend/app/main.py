@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
         from app.services.telegram_service import disconnect_all_clients
         await disconnect_all_clients()
     except Exception:
-        pass
+        logging.exception("Failed to disconnect active Telegram clients cleanly during shutdown")
 
 
 app = FastAPI(title="Telegram Cloud Storage MVP", lifespan=lifespan)

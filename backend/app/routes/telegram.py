@@ -17,7 +17,11 @@ def _save_telegram_session(current_user: User, info: dict, db: Session):
     current_user.telegram_session = encrypt_telegram_session(info["session_string"])
     current_user.telegram_user_id = info["tg_user_id"]
     current_user.channel_id = info["channel_id"]
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 @router.post("/api/telegram/2fa", response_model=TelegramQRStatusResponse)
 async def api_submit_2fa(req: Telegram2FARequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -35,10 +39,13 @@ async def api_submit_2fa(req: Telegram2FARequest, db: Session = Depends(get_db),
             )
         else:
             return TelegramQRStatusResponse(status=info["status"], message="Invalid state or token.")
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to submit 2FA for token %s", req.token)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to submit 2FA: {str(e)}"
+            detail="An unexpected error occurred during 2FA verification.",
         )
 
 @router.post("/api/telegram/phone-start", response_model=TelegramQRStartResponse)
@@ -50,8 +57,12 @@ async def api_phone_start(req: TelegramPhoneStartRequest, current_user: User = D
             user_tg_user_id=current_user.telegram_user_id
         )
         return TelegramQRStartResponse(token=token_id, url="")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to send code: {str(e)}")
+    except Exception:
+        logger.exception("Failed to start phone login for user %s", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to send verification code. Please try again.",
+        )
 
 @router.post("/api/telegram/phone-code", response_model=TelegramQRStatusResponse)
 async def api_phone_code(req: TelegramPhoneCodeRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -74,9 +85,12 @@ async def api_phone_code(req: TelegramPhoneCodeRequest, db: Session = Depends(ge
             
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error submitting phone code: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error submitting code: {str(e)}")
+    except Exception:
+        logger.exception("Error submitting phone code for token %s", req.token)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while verifying the code.",
+        )
 
 @router.post("/api/telegram/qr-start", response_model=TelegramQRStartResponse)
 async def api_qr_start(current_user: User = Depends(get_current_user)):
@@ -86,10 +100,11 @@ async def api_qr_start(current_user: User = Depends(get_current_user)):
             user_tg_user_id=current_user.telegram_user_id
         )
         return TelegramQRStartResponse(token=token_id, url=url)
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to start QR login for user %s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to start QR login: {str(e)}"
+            detail="Failed to start QR login. Please try again.",
         )
 
 @router.get("/api/telegram/qr-status", response_model=TelegramQRStatusResponse)
@@ -102,10 +117,11 @@ async def api_qr_status(token: str, db: Session = Depends(get_db), current_user:
             _save_telegram_session(current_user, info, db)
             
             return TelegramQRStatusResponse(status="success", message="Telegram account connected and private channel created successfully.")
-        except Exception as e:
+        except Exception:
+            logger.exception("Failed to save Telegram session for user %s", current_user.id)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to save session to DB: {str(e)}"
+                detail="Connected to Telegram but failed to save the session. Please try again.",
             )
     elif info["status"] == "account_mismatch":
         return TelegramQRStatusResponse(status="account_mismatch", message="This is a different Telegram account than before.")
@@ -114,16 +130,29 @@ async def api_qr_status(token: str, db: Session = Depends(get_db), current_user:
 
 @router.post("/api/telegram/override-mismatch", response_model=TelegramQRStatusResponse)
 async def api_override_mismatch(req: TelegramMismatchOverrideRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    info = await override_account_mismatch(req.token)
-    if info["status"] == "success":
-        info2 = check_qr_login_status(req.token) # This gets the full details and deletes from pending
-        if info2["status"] == "success":
-            try:
-                _save_telegram_session(current_user, info2, db)
-                return TelegramQRStatusResponse(status="success", message="Mismatched account accepted. New private channel created.")
-            except Exception as e:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to save session to DB: {str(e)}")
-    raise HTTPException(status_code=400, detail="Invalid token or state")
+    try:
+        info = await override_account_mismatch(req.token)
+        if info["status"] == "success":
+            info2 = check_qr_login_status(req.token) # This gets the full details and deletes from pending
+            if info2["status"] == "success":
+                try:
+                    _save_telegram_session(current_user, info2, db)
+                    return TelegramQRStatusResponse(status="success", message="Mismatched account accepted. New private channel created.")
+                except Exception:
+                    logger.exception("Failed to save session during mismatch override for user %s", current_user.id)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Connected but failed to save the session. Please try again.",
+                    )
+        raise HTTPException(status_code=400, detail="Invalid token or state")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unexpected error overriding mismatch for token %s", req.token)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to override account mismatch. Please try again.",
+        )
 
 @router.post("/api/telegram/disconnect")
 async def api_telegram_disconnect(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -131,9 +160,20 @@ async def api_telegram_disconnect(db: Session = Depends(get_db), current_user: U
     old_session = current_user.telegram_session
     current_user.telegram_session = None
     current_user.telegram_user_id = None
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to clear telegram session in database for user %s", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to disconnect Telegram account. Please try again.",
+        )
     if old_session and old_session in _client_cache:
         client = _client_cache.pop(old_session)
-        if client.is_connected():
-            await client.disconnect()
+        try:
+            if client.is_connected():
+                await client.disconnect()
+        except Exception:
+            logger.warning("Failed to cleanly disconnect cached client during disconnect")
     return {"status": "success", "message": "Telegram disconnected"}

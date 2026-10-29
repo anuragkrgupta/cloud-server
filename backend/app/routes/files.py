@@ -20,23 +20,48 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-from telethon.errors import SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError
+from telethon.errors import (
+    SessionExpiredError,
+    AuthKeyUnregisteredError,
+    AuthKeyDuplicatedError,
+    SessionRevokedError,
+    UserDeactivatedError,
+    UserDeactivatedBanError,
+    UnauthorizedError,
+)
 import logging
 logger = logging.getLogger(__name__)
 
+SESSION_REVOCATION_ERRORS = (
+    SessionExpiredError,
+    AuthKeyUnregisteredError,
+    AuthKeyDuplicatedError,
+    SessionRevokedError,
+    UserDeactivatedError,
+    UserDeactivatedBanError,
+    UnauthorizedError,
+)
+
 def handle_telegram_error(e: Exception, db: Session, current_user: User):
-    logger.exception(f"Telegram operation failed for user {current_user.id}: {e}")
-    if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError)) or "AuthKeyDuplicatedError" in type(e).__name__:
+    logger.exception("Telegram operation failed for user %s", current_user.id)
+    if isinstance(e, SESSION_REVOCATION_ERRORS) or "AuthKeyDuplicatedError" in type(e).__name__:
         old_session = current_user.telegram_session
         current_user.telegram_session = None
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to clear revoked telegram session in database for user %s", current_user.id)
         from app.services.telegram_service import _client_cache
         _client_cache.pop(old_session, None)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="Telegram session expired or revoked by Telegram. Please reconnect your account."
         )
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Telegram operation failed. Please try again.",
+    )
 
 class CompleteUploadParams(BaseModel):
     filename: str
@@ -73,9 +98,13 @@ def complete_upload(
         db.commit()
         db.refresh(file_record)
         return file_record
-    except Exception as e:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to complete upload: {str(e)}")
+        logger.exception("Failed to complete upload record for user %s", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save upload record. Please try again.",
+        )
 
 @router.get("/api/files", response_model=List[FileOut])
 def get_files(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -115,7 +144,6 @@ async def download_file(
             raise
         except Exception as e:
             handle_telegram_error(e, db, current_user)
-            raise HTTPException(status_code=500, detail=str(e))
 
         safe_filename = urllib.parse.quote(file_record.original_name)
         headers = {
@@ -126,8 +154,12 @@ async def download_file(
         return StreamingResponse(stream, media_type=file_record.mime_type, headers=headers)
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to stream file: {str(e)}")
+    except Exception:
+        logger.exception("Failed to stream file %s for user %s", file_id, current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to stream file. Please try again.",
+        )
 
 @router.delete("/api/files/{file_id}", response_model=Message)
 async def delete_file(
@@ -153,15 +185,27 @@ async def delete_file(
                 message_id=part.telegram_message_id
             )
         except Exception as e:
+            logger.warning(
+                "Failed to delete telegram message part %s for file %s: %s",
+                part.telegram_message_id, file_id, e
+            )
             errors.append(e)
             
-    db.delete(file_record)
-    db.commit()
+    try:
+        db.delete(file_record)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to delete file record %s from database", file_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete file record from database.",
+        )
     
     if errors:
         # Check if any error is a session error and handle it
         for e in errors:
-            if isinstance(e, (SessionExpiredError, AuthKeyUnregisteredError, AuthKeyDuplicatedError)) or "AuthKeyDuplicatedError" in type(e).__name__:
+            if isinstance(e, SESSION_REVOCATION_ERRORS) or "AuthKeyDuplicatedError" in type(e).__name__:
                 handle_telegram_error(e, db, current_user)
         return Message(message=f"File deleted with {len(errors)} Telegram error(s). DB cleaned up.")
         
@@ -178,9 +222,11 @@ async def upload_volume_stream(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.warning(f"upload_volume_stream: telegram_session={'SET' if current_user.telegram_session else 'NONE'}, channel_id={current_user.channel_id}")
+    logger.debug(
+        "upload_volume_stream: telegram_session=%s, channel_id=%s",
+        "SET" if current_user.telegram_session else "NONE",
+        current_user.channel_id,
+    )
     if not current_user.telegram_session or not current_user.channel_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram account not connected.")
         
@@ -198,5 +244,7 @@ async def upload_volume_stream(
             stream=request.stream()
         )
         return {"status": "success", "message_id": message_id}
+    except HTTPException:
+        raise
     except Exception as e:
         handle_telegram_error(e, db, current_user)

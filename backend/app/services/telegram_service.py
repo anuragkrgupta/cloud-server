@@ -84,9 +84,9 @@ async def _finalize_login(
             channel = result.chats[0]
             channel_id = str(channel.id)
         except Exception as e:
-            logger.error(f"Failed to create storage channel: {e}")
+            logger.exception("Failed to create storage channel: %s", e)
             await client.disconnect()
-            return {"status": "failed", "error": f"Could not create storage channel: {e}"}
+            return {"status": "failed", "error": "Could not create storage channel."}
     else:
         try:
             await get_resolved_entity(client, channel_id)
@@ -148,7 +148,7 @@ async def start_qr_login(user_channel_id: str = None, user_tg_user_id: str = Non
             pending_logins[tid]["user_tg_user_id"] = u_tg_user_id
             return # Keep connection open for password submission
         except Exception as e:
-            logger.error(f"QR Login failed for {tid}: {e}")
+            logger.exception("QR Login failed for token %s: %s", tid, e)
             pending_logins[tid]["status"] = "failed"
             await cli.disconnect()
 
@@ -186,10 +186,10 @@ async def submit_qr_password(token_id: str, password: str, force_new_channel: bo
         pending_logins[token_id].update(result)
         return result
     except Exception as e:
-        logger.error(f"Failed to submit 2FA password: {e}")
+        logger.exception("Failed to submit 2FA password for token %s: %s", token_id, e)
         pending_logins[token_id]["status"] = "failed"
         await client.disconnect()
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": "Invalid 2FA password or verification failed."}
 
 async def start_phone_login(phone_number: str, user_channel_id: str = None, user_tg_user_id: str = None) -> str:
     """
@@ -218,7 +218,7 @@ async def start_phone_login(phone_number: str, user_channel_id: str = None, user
         }
         return token_id
     except Exception as e:
-        logger.error(f"Failed to send code for phone login: {e}")
+        logger.exception("Failed to send code for phone login: %s", e)
         await client.disconnect()
         raise e
 
@@ -250,10 +250,10 @@ async def submit_phone_code(token_id: str, code: str) -> dict:
         # The client remains connected for 2FA submission.
         return {"status": "2fa_required"}
     except Exception as e:
-        logger.error(f"Failed to submit phone code: {e}")
+        logger.exception("Failed to submit phone code for token %s: %s", token_id, e)
         pending_logins[token_id]["status"] = "failed"
         await client.disconnect()
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": "Invalid verification code or login failed."}
 
 def check_qr_login_status(token_id: str) -> dict:
     """
@@ -311,7 +311,7 @@ async def override_account_mismatch(token_id: str) -> dict:
         channel = result.chats[0]
         channel_id = str(channel.id)
     except Exception as e:
-        logger.error(f"Failed to create storage channel on override: {e}")
+        logger.exception("Failed to create storage channel on override: %s", e)
         
     session_string = client.session.save()
     
@@ -365,7 +365,7 @@ async def upload_file_to_telegram(session_string: str, channel_id: str, file_pat
         )
         msg_id = message.id
     except Exception as e:
-        logger.error(f"Failed to upload file to telegram: {e}")
+        logger.exception("Failed to upload file to telegram: %s", e)
         raise e
     
         
@@ -398,7 +398,7 @@ async def download_file_stream(session_string: str, channel_id: str, message_id:
             
     
     except Exception as e:
-        logger.error(f"Download error: {e}")
+        logger.exception("Download error: %s", e)
         raise e
 
 async def download_multiple_messages_stream(session_string: str, channel_id: str, message_ids: list[int]) -> AsyncGenerator[bytes, None]:
@@ -439,7 +439,7 @@ async def download_multiple_messages_stream(session_string: str, channel_id: str
                 ):
                     yield chunk
         except Exception as e:
-            logger.error(f"Download stream error: {e}")
+            logger.exception("Download stream error: %s", e)
             raise e
 
     return _stream()
@@ -456,7 +456,7 @@ async def delete_file_from_telegram(session_string: str, channel_id: str, messag
         await client.delete_messages(entity, message_ids=[message_id])
     
     except Exception as e:
-        logger.error(f"Delete error: {e}")
+        logger.exception("Delete error: %s", e)
         raise e
 
 # Upload client pool was removed because upload_stream_parallel handles connections now.
@@ -485,7 +485,7 @@ async def upload_stream_to_telegram(
         message = await client.send_file(entity, file=input_file, force_document=True)
         return message.id
     except Exception as e:
-        logger.exception(f"Stream upload error: {e}")
+        logger.exception("Stream upload error: %s", e)
         raise e
 
 
