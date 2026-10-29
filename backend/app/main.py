@@ -1,10 +1,4 @@
-"""
-Application entrypoint.
 
-Run with:
-    cd backend
-    uvicorn app.main:app --reload
-"""
 import os
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -15,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, engine, check_database_connection
 from app.routes import auth_routes, telegram, files, share
 
 
@@ -50,12 +44,9 @@ ensure_hardware_acceleration()
 async def lifespan(app: FastAPI):
     # Verify hardware acceleration on server startup
     ensure_hardware_acceleration()
-    # Startup: Ensure database tables are created if DB is accessible
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        pass
-    yield
+    # Verify the database before attempting table creation.
+check_database_connection()
+Base.metadata.create_all(bind=engine)
     # Shutdown: Disconnect active Telegram clients cleanly
     try:
         from app.services.telegram_service import disconnect_all_clients
