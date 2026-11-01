@@ -62,9 +62,9 @@ async function startQRLogin() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
-        
+
         const data = await res.json();
-        
+
         if (!res.ok) {
             throw new Error(data.detail || 'Failed to start QR login');
         }
@@ -73,21 +73,21 @@ async function startQRLogin() {
         loadingMsg.classList.add('hidden');
         qrWrapper.classList.remove('hidden');
         qrWrapper.classList.add('flex');
-        
+
         qrContainer.innerHTML = "";
         new QRCode(qrContainer, {
             text: data.url,
             width: 200,
             height: 200,
-            colorDark : "#000000",
-            colorLight : "#ffffff",
-            correctLevel : QRCode.CorrectLevel.L
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.L
         });
 
         // Start polling status
         currentToken = data.token;
         pollInterval = setInterval(() => checkStatus(data.token), 2000);
-        
+
     } catch (err) {
         showError(err.message);
     }
@@ -95,7 +95,9 @@ async function startQRLogin() {
 
 async function checkStatus(token) {
     try {
-        const res = await apiFetch(`/api/telegram/qr-status?token=${token}`);
+        const res = await apiFetch(
+            `/api/telegram/qr-status?qr_token=${encodeURIComponent(token)}`
+        );
         const data = await res.json();
 
         if (data.status === 'success') {
@@ -134,7 +136,7 @@ btnTabQr.addEventListener('click', () => {
     btnTabQr.classList.remove('border-transparent', 'text-slate-400');
     btnTabPhone.classList.remove('border-indigo-500', 'text-indigo-400');
     btnTabPhone.classList.add('border-transparent', 'text-slate-400');
-    
+
     phoneWrapper.classList.add('hidden');
     phoneWrapper.classList.remove('flex');
     qrWrapper.classList.remove('hidden');
@@ -146,7 +148,7 @@ btnTabPhone.addEventListener('click', () => {
     btnTabPhone.classList.remove('border-transparent', 'text-slate-400');
     btnTabQr.classList.remove('border-indigo-500', 'text-indigo-400');
     btnTabQr.classList.add('border-transparent', 'text-slate-400');
-    
+
     qrWrapper.classList.add('hidden');
     qrWrapper.classList.remove('flex');
     phoneWrapper.classList.remove('hidden');
@@ -160,10 +162,10 @@ btnSendCode.addEventListener('click', async () => {
         showError("Please enter your phone number.");
         return;
     }
-    
+
     btnSendCode.disabled = true;
     btnSendCode.textContent = "Sending...";
-    
+
     try {
         const res = await apiFetch('/api/telegram/phone-start', {
             method: 'POST',
@@ -171,16 +173,16 @@ btnSendCode.addEventListener('click', async () => {
             body: JSON.stringify({ phone_number: phone })
         });
         const data = await res.json();
-        
+
         if (!res.ok) throw new Error(data.detail || 'Failed to send code');
-        
+
         currentToken = data.token;
         phoneStep1.classList.add('hidden');
         phoneStep2.classList.remove('hidden');
-        
+
         // Stop QR polling if it was running
         if (pollInterval) clearInterval(pollInterval);
-        
+
     } catch (err) {
         showError(err.message);
         btnSendCode.disabled = false;
@@ -194,10 +196,10 @@ btnVerifyCode.addEventListener('click', async () => {
         showError("Please enter the code.");
         return;
     }
-    
+
     btnVerifyCode.disabled = true;
     btnVerifyCode.textContent = "Verifying...";
-    
+
     try {
         const res = await apiFetch('/api/telegram/phone-code', {
             method: 'POST',
@@ -205,9 +207,9 @@ btnVerifyCode.addEventListener('click', async () => {
             body: JSON.stringify({ token: currentToken, phone_code: code })
         });
         const data = await res.json();
-        
+
         if (!res.ok && data.status !== 'account_mismatch') throw new Error(data.detail || data.message || 'Failed to verify code');
-        
+
         if (data.status === 'success') {
             showSuccess('Telegram connected! Redirecting to dashboard...');
             setTimeout(() => {
@@ -239,25 +241,25 @@ btnSubmit2fa.addEventListener('click', async () => {
         showError("Please enter your password.");
         return;
     }
-    
+
     faWrapper.classList.add('hidden');
     faWrapper.classList.remove('flex');
     loadingMsg.textContent = "Verifying password...";
     loadingMsg.classList.remove('hidden');
-    
+
     try {
         const res = await apiFetch('/api/telegram/2fa', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: currentToken, password: password })
         });
-        
+
         const data = await res.json();
-        
+
         if (!res.ok && data.status !== 'account_mismatch') {
             throw new Error(data.detail || data.message || 'Failed to verify password');
         }
-        
+
         if (data.status === 'success') {
             showSuccess('Telegram connected! Redirecting to dashboard...');
             setTimeout(() => {
@@ -286,16 +288,16 @@ btnOverrideMismatch.addEventListener('click', async () => {
     mismatchWrapper.classList.remove('flex');
     loadingMsg.textContent = "Creating new storage channel...";
     loadingMsg.classList.remove('hidden');
-    
+
     try {
         const res = await apiFetch('/api/telegram/override-mismatch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: currentToken })
         });
-        
+
         const data = await res.json();
-        
+
         if (data.status === 'success') {
             showSuccess('Mismatched account accepted! Redirecting...');
             setTimeout(() => {
