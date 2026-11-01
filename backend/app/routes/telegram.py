@@ -108,24 +108,37 @@ async def api_qr_start(current_user: User = Depends(get_current_user)):
         )
 
 @router.get("/api/telegram/qr-status", response_model=TelegramQRStatusResponse)
-async def api_qr_status(token: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    info = check_qr_login_status(token)
-    
+async def api_qr_status(
+    qr_token: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    info = check_qr_login_status(qr_token)
+
     if info["status"] == "success":
         try:
-            # Save to database
             _save_telegram_session(current_user, info, db)
-            
-            return TelegramQRStatusResponse(status="success", message="Telegram account connected and private channel created successfully.")
+
+            return TelegramQRStatusResponse(
+                status="success",
+                message="Telegram account connected and private channel created successfully."
+            )
         except Exception:
-            logger.exception("Failed to save Telegram session for user %s", current_user.id)
+            logger.exception(
+                "Failed to save Telegram session for user %s",
+                current_user.id
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Connected to Telegram but failed to save the session. Please try again.",
             )
+
     elif info["status"] == "account_mismatch":
-        return TelegramQRStatusResponse(status="account_mismatch", message="This is a different Telegram account than before.")
-            
+        return TelegramQRStatusResponse(
+            status="account_mismatch",
+            message="This is a different Telegram account than before."
+        )
+
     return TelegramQRStatusResponse(status=info["status"])
 
 @router.post("/api/telegram/override-mismatch", response_model=TelegramQRStatusResponse)
